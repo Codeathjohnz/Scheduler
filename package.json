@@ -1,0 +1,12 @@
+{
+  "name": "adssu-scheduling",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n SERVER,CLIENT -c green,blue \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "build": "npm run build --prefix client && xcopy /E /Y client\\dist\\* server\\public\\"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
