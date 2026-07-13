@@ -1,213 +1,361 @@
--- ADSSU Room Scheduling System — Full Database Init
--- Used by Docker MariaDB on first startup (docker-entrypoint-initdb.d)
+-- ADSSU Room Scheduling System — full schema dump (auto-generated from live dev DB)
+-- Generated 2026-07-13T08:24:53.387Z
 
-CREATE DATABASE IF NOT EXISTS adssu_scheduling CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE adssu_scheduling;
+SET FOREIGN_KEY_CHECKS=0;
 
--- ── Users ─────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS users (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  username VARCHAR(50) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  name VARCHAR(100) NOT NULL,
-  role ENUM('chair','vpaa','admin','instructor','student') NOT NULL,
-  department VARCHAR(100),
-  section VARCHAR(20),
-  email VARCHAR(150),
-  mobility_level TINYINT DEFAULT 3,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+-- --------------------------------------------------
+-- Table: accessibility_requests
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `accessibility_requests` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `instructor_id` int(11) NOT NULL,
+  `reason` varchar(255) NOT NULL,
+  `details` text DEFAULT NULL,
+  `mobility_level` tinyint(4) DEFAULT NULL,
+  `status` enum('pending','approved','rejected') DEFAULT 'pending',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `reviewed_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `instructor_id` (`instructor_id`),
+  CONSTRAINT `accessibility_requests_ibfk_1` FOREIGN KEY (`instructor_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── OTP codes ─────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS otp_codes (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  user_id INT NOT NULL,
-  otp_code VARCHAR(6) NOT NULL,
-  expires_at DATETIME NOT NULL,
-  used TINYINT(1) DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+-- --------------------------------------------------
+-- Table: building_priorities
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `building_priorities` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `building` varchar(50) NOT NULL,
+  `program` varchar(100) NOT NULL,
+  `priority` int(11) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_building_program` (`building`,`program`),
+  UNIQUE KEY `uq_building_priority` (`building`,`priority`)
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── Buildings & Rooms ─────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS buildings (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(100) NOT NULL,
-  code VARCHAR(20) NOT NULL
-);
+-- --------------------------------------------------
+-- Table: buildings
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `buildings` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `code` varchar(20) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS rooms (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  building VARCHAR(50) NOT NULL,
-  room_number VARCHAR(20) NOT NULL,
-  capacity INT NOT NULL DEFAULT 40,
-  room_type ENUM('Lecture','Laboratory','Special') NOT NULL DEFAULT 'Lecture',
-  floor_level TINYINT NOT NULL DEFAULT 1,
-  is_accessible TINYINT(1) DEFAULT 0,
-  UNIQUE KEY uq_room (building, room_number)
-);
+-- --------------------------------------------------
+-- Table: faculty_admin_loads
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `faculty_admin_loads` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `instructor_id` int(11) NOT NULL,
+  `academic_year` varchar(20) NOT NULL,
+  `semester` tinyint(4) NOT NULL DEFAULT 1,
+  `description` varchar(200) DEFAULT NULL,
+  `units` float DEFAULT 0,
+  `hours` float DEFAULT NULL,
+  `lec_hours` float DEFAULT 0,
+  `lab_hours` float DEFAULT 0,
+  `load_type` enum('administrative','research','extension','project','consultation','lesson_prep') NOT NULL DEFAULT 'administrative',
+  `chair_id` int(11) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `instructor_id` (`instructor_id`),
+  KEY `chair_id` (`chair_id`),
+  CONSTRAINT `faculty_admin_loads_ibfk_1` FOREIGN KEY (`instructor_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `faculty_admin_loads_ibfk_2` FOREIGN KEY (`chair_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── Subjects ──────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS subjects (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  code VARCHAR(20) NOT NULL UNIQUE,
-  title VARCHAR(150) NOT NULL,
-  units TINYINT NOT NULL,
-  lec_hours TINYINT DEFAULT 0,
-  lab_hours TINYINT DEFAULT 0,
-  room_type_required ENUM('Lecture','Laboratory','Special','Any') DEFAULT 'Lecture',
-  prerequisite_code VARCHAR(20) DEFAULT NULL
-);
+-- --------------------------------------------------
+-- Table: faculty_load_entries
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `faculty_load_entries` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `academic_year` varchar(20) NOT NULL DEFAULT '2026-2027',
+  `semester` tinyint(4) NOT NULL DEFAULT 1,
+  `course_code` varchar(40) NOT NULL,
+  `descriptive_title` varchar(250) NOT NULL,
+  `program_yr_sec` varchar(50) NOT NULL,
+  `year_level` tinyint(4) DEFAULT NULL,
+  `units` float DEFAULT 3,
+  `lec_hours` float DEFAULT 3,
+  `lab_hours` float DEFAULT 0,
+  `assigned_instructor_id` int(11) DEFAULT NULL,
+  `room` varchar(50) DEFAULT NULL,
+  `subject_id` int(11) DEFAULT NULL,
+  `sort_order` int(11) DEFAULT 0,
+  `chair_id` int(11) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `assigned_instructor_id` (`assigned_instructor_id`),
+  KEY `chair_id` (`chair_id`),
+  KEY `subject_id` (`subject_id`),
+  CONSTRAINT `faculty_load_entries_ibfk_1` FOREIGN KEY (`assigned_instructor_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `faculty_load_entries_ibfk_2` FOREIGN KEY (`chair_id`) REFERENCES `users` (`id`),
+  CONSTRAINT `faculty_load_entries_ibfk_3` FOREIGN KEY (`subject_id`) REFERENCES `prospectus_subjects` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB AUTO_INCREMENT=2383 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── Sections ──────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS sections (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  program VARCHAR(20) NOT NULL,
-  year_level TINYINT NOT NULL,
-  section_letter VARCHAR(5) NOT NULL,
-  UNIQUE KEY uq_section (program, year_level, section_letter)
-);
+-- --------------------------------------------------
+-- Table: generated_schedules
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `generated_schedules` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `academic_year` varchar(20) NOT NULL,
+  `semester` tinyint(4) NOT NULL DEFAULT 1,
+  `faculty_entry_id` int(11) NOT NULL,
+  `session_type` enum('lecture','lab') DEFAULT 'lecture',
+  `room_id` int(11) DEFAULT NULL,
+  `days` varchar(100) NOT NULL,
+  `start_time` time NOT NULL,
+  `end_time` time NOT NULL,
+  `is_manual` tinyint(1) DEFAULT 0,
+  `is_published` tinyint(1) DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `faculty_entry_id` (`faculty_entry_id`),
+  KEY `room_id` (`room_id`),
+  CONSTRAINT `generated_schedules_ibfk_1` FOREIGN KEY (`faculty_entry_id`) REFERENCES `faculty_load_entries` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `generated_schedules_ibfk_2` FOREIGN KEY (`room_id`) REFERENCES `rooms` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB AUTO_INCREMENT=912 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── Submissions ───────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS submissions (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  chair_id INT NOT NULL,
-  status ENUM('pending_vpaa','pending_admin','validated','returned','scheduled') DEFAULT 'pending_vpaa',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  vpaa_action_at TIMESTAMP NULL,
-  admin_action_at TIMESTAMP NULL,
-  FOREIGN KEY (chair_id) REFERENCES users(id)
-);
+-- --------------------------------------------------
+-- Table: instructor_specialties
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `instructor_specialties` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `instructor_id` int(11) NOT NULL,
+  `subject_id` int(11) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_specialty` (`instructor_id`,`subject_id`),
+  KEY `subject_id` (`subject_id`),
+  CONSTRAINT `instructor_specialties_ibfk_1` FOREIGN KEY (`instructor_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `instructor_specialties_ibfk_2` FOREIGN KEY (`subject_id`) REFERENCES `prospectus_subjects` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=396 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS submission_entries (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  submission_id INT NOT NULL,
-  instructor_id INT NOT NULL,
-  subject_code VARCHAR(20) NOT NULL,
-  section VARCHAR(20) NOT NULL,
-  program VARCHAR(20) NOT NULL,
-  year_level TINYINT NOT NULL,
-  FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
-  FOREIGN KEY (instructor_id) REFERENCES users(id)
-);
+-- --------------------------------------------------
+-- Table: load_requests
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `load_requests` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `instructor_id` int(11) NOT NULL,
+  `academic_year` varchar(20) NOT NULL,
+  `semester` tinyint(4) NOT NULL DEFAULT 1,
+  `load_type` enum('administrative','research','extension','project','consultation','lesson_prep') NOT NULL,
+  `description` varchar(200) NOT NULL,
+  `units` float NOT NULL,
+  `hours` float DEFAULT NULL,
+  `status` enum('pending','approved','rejected') DEFAULT 'pending',
+  `reviewed_by` int(11) DEFAULT NULL,
+  `reviewed_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `instructor_id` (`instructor_id`),
+  KEY `reviewed_by` (`reviewed_by`),
+  CONSTRAINT `load_requests_ibfk_1` FOREIGN KEY (`instructor_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `load_requests_ibfk_2` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── Schedules ─────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS schedules (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  submission_id INT NOT NULL,
-  instructor_id INT NOT NULL,
-  room_id INT NOT NULL,
-  subject_code VARCHAR(20) NOT NULL,
-  section VARCHAR(20) NOT NULL,
-  day_of_week ENUM('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday') NOT NULL,
-  start_time TIME NOT NULL,
-  end_time TIME NOT NULL,
-  status ENUM('pending','approved','rejected') DEFAULT 'pending',
-  generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (submission_id) REFERENCES submissions(id),
-  FOREIGN KEY (instructor_id) REFERENCES users(id),
-  FOREIGN KEY (room_id) REFERENCES rooms(id)
-);
+-- --------------------------------------------------
+-- Table: otp_codes
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `otp_codes` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `otp_code` varchar(6) NOT NULL,
+  `expires_at` datetime NOT NULL,
+  `used` tinyint(1) DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `user_id` (`user_id`),
+  CONSTRAINT `otp_codes_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── Accessibility ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS accessibility_requests (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  instructor_id INT NOT NULL,
-  reason VARCHAR(255) NOT NULL,
-  details TEXT,
-  mobility_level TINYINT DEFAULT NULL,
-  status ENUM('pending','approved','rejected') DEFAULT 'pending',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  reviewed_at TIMESTAMP NULL,
-  FOREIGN KEY (instructor_id) REFERENCES users(id)
-);
+-- --------------------------------------------------
+-- Table: prospectus
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `prospectus` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `program` varchar(100) NOT NULL DEFAULT 'BSIT',
+  `academic_year` varchar(20) DEFAULT NULL,
+  `filename` varchar(255) DEFAULT NULL,
+  `uploaded_by` int(11) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `uploaded_by` (`uploaded_by`),
+  CONSTRAINT `prospectus_ibfk_1` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── Prospectus ────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS prospectus (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  program VARCHAR(50) NOT NULL,
-  academic_year VARCHAR(20),
-  filename VARCHAR(255),
-  uploaded_by INT NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (uploaded_by) REFERENCES users(id)
-);
+-- --------------------------------------------------
+-- Table: prospectus_subjects
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `prospectus_subjects` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `prospectus_id` int(11) NOT NULL,
+  `course_code` varchar(40) NOT NULL,
+  `descriptive_title` varchar(250) NOT NULL,
+  `units` float DEFAULT 0,
+  `lec_hours` float DEFAULT 0,
+  `lab_hours` float DEFAULT 0,
+  `year_level` tinyint(4) NOT NULL,
+  `semester` tinyint(4) NOT NULL,
+  `prerequisite` varchar(250) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `prospectus_id` (`prospectus_id`),
+  CONSTRAINT `prospectus_subjects_ibfk_1` FOREIGN KEY (`prospectus_id`) REFERENCES `prospectus` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=526 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS prospectus_subjects (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  prospectus_id INT NOT NULL,
-  course_code VARCHAR(40) NOT NULL,
-  descriptive_title VARCHAR(250) NOT NULL,
-  units FLOAT DEFAULT 0,
-  lec_hours FLOAT DEFAULT 0,
-  lab_hours FLOAT DEFAULT 0,
-  year_level TINYINT DEFAULT 1,
-  semester TINYINT DEFAULT 1,
-  prerequisite VARCHAR(100),
-  FOREIGN KEY (prospectus_id) REFERENCES prospectus(id) ON DELETE CASCADE
-);
+-- --------------------------------------------------
+-- Table: rooms
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `rooms` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `building` varchar(50) NOT NULL,
+  `room_number` varchar(20) NOT NULL,
+  `capacity` int(11) NOT NULL DEFAULT 40,
+  `room_type` enum('Lecture','Laboratory','Special') NOT NULL DEFAULT 'Lecture',
+  `floor_level` tinyint(4) NOT NULL DEFAULT 1,
+  `is_accessible` tinyint(1) DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_room` (`building`,`room_number`)
+) ENGINE=InnoDB AUTO_INCREMENT=27 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── Instructor Specialties ────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS instructor_specialties (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  instructor_id INT NOT NULL,
-  subject_id INT NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_specialty (instructor_id, subject_id),
-  FOREIGN KEY (instructor_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (subject_id) REFERENCES prospectus_subjects(id) ON DELETE CASCADE
-);
+-- --------------------------------------------------
+-- Table: schedules
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `schedules` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `submission_id` int(11) NOT NULL,
+  `instructor_id` int(11) NOT NULL,
+  `room_id` int(11) NOT NULL,
+  `subject_code` varchar(20) NOT NULL,
+  `section` varchar(20) NOT NULL,
+  `day_of_week` enum('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday') NOT NULL,
+  `start_time` time NOT NULL,
+  `end_time` time NOT NULL,
+  `status` enum('pending','approved','rejected') DEFAULT 'pending',
+  `generated_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `submission_id` (`submission_id`),
+  KEY `instructor_id` (`instructor_id`),
+  KEY `room_id` (`room_id`),
+  CONSTRAINT `schedules_ibfk_1` FOREIGN KEY (`submission_id`) REFERENCES `submissions` (`id`),
+  CONSTRAINT `schedules_ibfk_2` FOREIGN KEY (`instructor_id`) REFERENCES `users` (`id`),
+  CONSTRAINT `schedules_ibfk_3` FOREIGN KEY (`room_id`) REFERENCES `rooms` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── Faculty Loading ───────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS faculty_load_entries (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  academic_year VARCHAR(20) NOT NULL DEFAULT '2026-2027',
-  semester TINYINT NOT NULL DEFAULT 1,
-  course_code VARCHAR(40) NOT NULL,
-  descriptive_title VARCHAR(250) NOT NULL,
-  program_yr_sec VARCHAR(50) NOT NULL DEFAULT '',
-  units FLOAT DEFAULT 3,
-  lec_hours FLOAT DEFAULT 3,
-  lab_hours FLOAT DEFAULT 0,
-  assigned_instructor_id INT,
-  room VARCHAR(50),
-  subject_id INT,
-  sort_order INT DEFAULT 0,
-  chair_id INT NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (assigned_instructor_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY (chair_id) REFERENCES users(id),
-  FOREIGN KEY (subject_id) REFERENCES prospectus_subjects(id) ON DELETE SET NULL
-);
+-- --------------------------------------------------
+-- Table: section_counts
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `section_counts` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `chair_id` int(11) NOT NULL,
+  `academic_year` varchar(20) NOT NULL,
+  `semester` tinyint(4) NOT NULL,
+  `year_level` tinyint(4) NOT NULL,
+  `section_count` tinyint(4) NOT NULL DEFAULT 1,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_section_count` (`chair_id`,`academic_year`,`semester`,`year_level`),
+  CONSTRAINT `section_counts_ibfk_1` FOREIGN KEY (`chair_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS faculty_admin_loads (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  instructor_id INT NOT NULL,
-  academic_year VARCHAR(20) NOT NULL,
-  semester TINYINT NOT NULL DEFAULT 1,
-  description VARCHAR(200),
-  units FLOAT DEFAULT 0,
-  lec_hours FLOAT DEFAULT 0,
-  lab_hours FLOAT DEFAULT 0,
-  chair_id INT NOT NULL,
-  FOREIGN KEY (instructor_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (chair_id) REFERENCES users(id)
-);
+-- --------------------------------------------------
+-- Table: sections
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `sections` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `program` varchar(20) NOT NULL,
+  `year_level` tinyint(4) NOT NULL,
+  `section_letter` varchar(5) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_section` (`program`,`year_level`,`section_letter`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── Seed: Sample rooms ────────────────────────────────────────────────────────
-INSERT IGNORE INTO rooms (building, room_number, capacity, room_type, floor_level, is_accessible) VALUES
-('CEIT', '107', 50, 'Lecture', 1, 1),
-('CEIT', '207', 50, 'Lecture', 2, 0),
-('CEIT', '208', 50, 'Lecture', 2, 0),
-('CEIT', 'Lab 1', 40, 'Laboratory', 1, 1),
-('CCIS', '101', 50, 'Lecture', 1, 1),
-('CCIS', '102', 50, 'Lecture', 1, 1),
-('CCIS', 'ICT Lab 1', 40, 'Laboratory', 1, 1),
-('CCIS', 'ICT Lab 2', 40, 'Laboratory', 1, 1);
+-- --------------------------------------------------
+-- Table: subjects
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `subjects` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `code` varchar(20) NOT NULL,
+  `title` varchar(150) NOT NULL,
+  `units` tinyint(4) NOT NULL,
+  `lec_hours` tinyint(4) DEFAULT 0,
+  `lab_hours` tinyint(4) DEFAULT 0,
+  `room_type_required` enum('Lecture','Laboratory','Special','Any') DEFAULT 'Lecture',
+  `prerequisite_code` varchar(20) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `code` (`code`)
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── Seed: Default admin user ──────────────────────────────────────────────────
--- Password: admin123 (bcrypt hash — CHANGE IN PRODUCTION via User Management)
-INSERT IGNORE INTO users (username, password_hash, name, role, department, email) VALUES
-('admin', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi.', 'System Administrator', 'admin', 'Registrar''s Office', NULL);
--- Note: the hash above is for 'password' — change it immediately after first login
--- To generate a real hash: node -e "const b=require('bcryptjs'); b.hash('yourpw',10).then(console.log)"
+-- --------------------------------------------------
+-- Table: submission_confirmations
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `submission_confirmations` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `submission_id` int(11) NOT NULL,
+  `instructor_id` int(11) NOT NULL,
+  `confirmed_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_submission_instructor` (`submission_id`,`instructor_id`),
+  KEY `instructor_id` (`instructor_id`),
+  CONSTRAINT `submission_confirmations_ibfk_1` FOREIGN KEY (`submission_id`) REFERENCES `submissions` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `submission_confirmations_ibfk_2` FOREIGN KEY (`instructor_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=58 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------
+-- Table: submission_entries
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `submission_entries` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `submission_id` int(11) NOT NULL,
+  `instructor_id` int(11) NOT NULL,
+  `subject_code` varchar(20) NOT NULL,
+  `section` varchar(20) NOT NULL,
+  `program` varchar(20) NOT NULL,
+  `year_level` tinyint(4) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `submission_id` (`submission_id`),
+  KEY `instructor_id` (`instructor_id`),
+  CONSTRAINT `submission_entries_ibfk_1` FOREIGN KEY (`submission_id`) REFERENCES `submissions` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `submission_entries_ibfk_2` FOREIGN KEY (`instructor_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------
+-- Table: submissions
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `submissions` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `chair_id` int(11) NOT NULL,
+  `status` enum('pending_instructor','pending_dean','pending_qa','pending_vpaa','pending_admin','validated','returned','scheduled') DEFAULT 'pending_instructor',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `vpaa_action_at` timestamp NULL DEFAULT NULL,
+  `dean_action_at` timestamp NULL DEFAULT NULL,
+  `qa_action_at` timestamp NULL DEFAULT NULL,
+  `admin_action_at` timestamp NULL DEFAULT NULL,
+  `academic_year` varchar(20) DEFAULT NULL,
+  `semester` tinyint(4) DEFAULT NULL,
+  `submission_type` enum('manual','faculty_load') DEFAULT 'manual',
+  PRIMARY KEY (`id`),
+  KEY `chair_id` (`chair_id`),
+  CONSTRAINT `submissions_ibfk_1` FOREIGN KEY (`chair_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------
+-- Table: users
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `username` varchar(50) NOT NULL,
+  `password_hash` varchar(255) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `role` enum('admin','chair','vpaa','instructor','student','dean','quality_assurance') NOT NULL,
+  `department` varchar(100) DEFAULT NULL,
+  `section` varchar(20) DEFAULT NULL,
+  `mobility_level` tinyint(4) DEFAULT 3,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `email` varchar(150) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `username` (`username`)
+) ENGINE=InnoDB AUTO_INCREMENT=63 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET FOREIGN_KEY_CHECKS=1;
