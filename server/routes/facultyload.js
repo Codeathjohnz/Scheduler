@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
+import { generateFacultyLoadingDocx } from '../utils/facultyLoadingDocx.js'
 
 const router = Router()
 
@@ -153,6 +154,26 @@ router.get('/', authenticate, authorize('chair', 'admin'), async (req, res) => {
     res.json({ entries, adminLoads })
   } catch (err) {
     res.status(500).json({ message: err.message })
+  }
+})
+
+// GET /api/faculty-load/export-docx?year=&semester=&collegeName=&programName=
+// Official Faculty Loading form (F-REG-010), one instructor block per
+// assigned instructor, filled from this term's faculty_load_entries +
+// faculty_admin_loads. Chairs export their own department; admin may pass
+// chair_id to export any department's.
+router.get('/export-docx', authenticate, authorize('chair', 'admin'), async (req, res) => {
+  const { year = '2026-2027', semester = 1, collegeName, programName, chair_id } = req.query
+  const chairId = req.user.role === 'admin' && chair_id ? Number(chair_id) : req.user.id
+  try {
+    const buffer = await generateFacultyLoadingDocx({
+      chairId, academicYear: year, semester: Number(semester), collegeName, programName,
+    })
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    res.setHeader('Content-Disposition', `attachment; filename="FacultyLoading_${year}_Sem${semester}.docx"`)
+    res.send(buffer)
+  } catch (err) {
+    res.status(400).json({ message: err.message })
   }
 })
 

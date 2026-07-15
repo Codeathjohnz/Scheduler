@@ -97,6 +97,33 @@ function PrintView({ entries, adminLoads, year, semester, onClose }) {
 
   const handlePrint = () => window.print()
 
+  const [downloadingDocx, setDownloadingDocx] = useState(false)
+  const handleDownloadDocx = async () => {
+    const collegeName = window.prompt('College full name (as it should appear on the form):', 'COLLEGE OF COMPUTING AND INFORMATION SCIENCE')
+    if (collegeName === null) return
+    const programName = window.prompt('Program full name (as it should appear on the form):', 'BACHELOR OF SCIENCE IN INFORMATION TECHNOLOGY')
+    if (programName === null) return
+    setDownloadingDocx(true)
+    try {
+      const res = await facultyLoadAPI.exportDocx(year, semester, collegeName, programName)
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `FacultyLoading_${year}_Sem${semester}.docx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('Faculty Loading downloaded.')
+    } catch (err) {
+      const isBlob = err.response?.data instanceof Blob
+      const message = isBlob ? JSON.parse(await err.response.data.text()).message : err.response?.data?.message
+      toast.error(message || 'Download failed.')
+    } finally {
+      setDownloadingDocx(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-white overflow-auto">
       {/* Screen-only toolbar */}
@@ -106,8 +133,13 @@ function PrintView({ entries, adminLoads, year, semester, onClose }) {
         </button>
         <span className="text-green-300 text-sm">|</span>
         <span className="text-sm font-semibold">Faculty Loading Sheet — AY {year} {semLabel} Semester</span>
+        <button onClick={handleDownloadDocx} disabled={downloadingDocx}
+          className="ml-auto flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-bold px-4 py-1.5 rounded-lg transition text-sm">
+          {downloadingDocx ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+          Download DOCX
+        </button>
         <button onClick={handlePrint}
-          className="ml-auto flex items-center gap-2 bg-amber-400 hover:bg-amber-300 text-green-900 font-bold px-4 py-1.5 rounded-lg transition text-sm">
+          className="flex items-center gap-2 bg-amber-400 hover:bg-amber-300 text-green-900 font-bold px-4 py-1.5 rounded-lg transition text-sm">
           <Printer className="w-4 h-4" /> Print
         </button>
       </div>

@@ -98,6 +98,10 @@ export const facultyLoadAPI = {
   autoGenerate:     (data)                  => api.post('/faculty-load/auto-generate', data),
   getSectionCounts: (year, sem)             => api.get(`/faculty-load/section-counts?year=${year}&semester=${sem}`),
   setSectionCounts: (academic_year, semester, counts) => api.put('/faculty-load/section-counts', { academic_year, semester, counts }),
+  exportDocx:       (year, sem, collegeName, programName) => api.get(
+    `/faculty-load/export-docx?year=${year}&semester=${sem}&collegeName=${encodeURIComponent(collegeName)}&programName=${encodeURIComponent(programName)}`,
+    { responseType: 'blob' }
+  ),
 }
 
 export const schedulingAPI = {
