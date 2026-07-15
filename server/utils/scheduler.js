@@ -815,12 +815,18 @@ export async function generateScheduleORTools(entries, rooms, mobilityMap = {}, 
 
   if (sessions.length === 0) return { scheduled: [], unscheduled: [], engine: 'ortools' }
 
+  // Metadata parallel to each session's `options` array (roomIdx/patternIdx/
+  // isOnline per option) — kept out of the wire payload, used only to locate
+  // the matching option index when converting the greedy warm-start below.
+  const optMeta = []
+
   const payload = {
     maxTimeSeconds,
     sessions: sessions.map((session, i) => {
       const cand = candidates[i]
       const opts = []
-      cand.candidateRooms.forEach(room => {
+      const meta = []
+      cand.candidateRooms.forEach((room, roomIdx) => {
         session.patterns.forEach((pattern, patternIdx) => {
           const starts = cand.startsByPattern[patternIdx]
           if (!starts.length) return
@@ -832,6 +838,7 @@ export async function generateScheduleORTools(entries, rooms, mobilityMap = {}, 
             baseScore: computeStaticScore(session, room, buildingPriorities),
             startOptions: starts,
           })
+          meta.push({ isOnline: false, roomIdx, patternIdx })
         })
       })
       if (cand.canGoOnline) {
@@ -846,11 +853,33 @@ export async function generateScheduleORTools(entries, rooms, mobilityMap = {}, 
             baseScore: 0,
             startOptions: starts,
           })
+          meta.push({ isOnline: true, roomIdx: -1, patternIdx })
         })
       }
+      optMeta.push(meta)
       return { index: i, instructorId: session.instructorId, programYrSec: session.programYrSec, options: opts }
     }),
   }
+
+  // Warm-start: seed the solver with the greedy engine's own solution
+  // (converted to gene form via the same helper the GA uses) so CP-SAT
+  // always has a feasible incumbent to start from — a hard time budget can
+  // then never return UNKNOWN/no-solution the way a cold random search can
+  // on a large real-world instance, mirroring the GA's "never worse than
+  // greedy" guarantee.
+  const seedGenes = seedFromGreedy(sessions, candidates, entries, rooms, mobilityMap, buildingPriorities)
+  const hints = []
+  seedGenes.forEach((gene, i) => {
+    if (gene.type === 'none') return
+    const k = optMeta[i].findIndex(m =>
+      m.isOnline === (gene.type === 'online') &&
+      m.patternIdx === gene.patternIdx &&
+      (gene.type === 'online' || m.roomIdx === gene.roomIdx)
+    )
+    if (k === -1) return
+    hints.push({ sessionIndex: i, optionIndex: k, startMin: gene.startMin })
+  })
+  payload.hints = hints
 
   const startTime = Date.now()
   let response

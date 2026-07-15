@@ -48,9 +48,16 @@ class Session(BaseModel):
     options: list[Option] = []
 
 
+class Hint(BaseModel):
+    sessionIndex: int
+    optionIndex: int
+    startMin: int
+
+
 class SolveRequest(BaseModel):
     sessions: list[Session]
     maxTimeSeconds: float = 20.0
+    hints: list[Hint] = []
 
 
 @app.get("/health")
@@ -111,6 +118,19 @@ def solve(req: SolveRequest):
         model.add_no_overlap(group)
     for group in sect_day_groups.values():
         model.add_no_overlap(group)
+
+    # Warm-start from the caller's own greedy solution (Node seeds this from
+    # its `seedFromGreedy` helper). This guarantees the solver has a feasible
+    # incumbent immediately — without it, CP-SAT's search on a large real
+    # instance can hit the time budget before finding any feasible solution
+    # at all (status UNKNOWN), even though a decent solution obviously exists.
+    for hint in req.hints:
+        key = (hint.sessionIndex, hint.optionIndex)
+        if key not in presence:
+            continue
+        model.add_hint(presence[key], 1)
+        model.add_hint(starts[key], hint.startMin)
+        model.add_hint(unscheduled[hint.sessionIndex], 0)
 
     objective_terms = []
     for session in req.sessions:
