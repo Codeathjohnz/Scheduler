@@ -77,6 +77,25 @@ for (let h = 7; h <= 20; h++) {
   }
 }
 
+// True if at least one of the session's meeting patterns can fit on some day
+// at all, independent of room/instructor/section availability — i.e. the
+// pattern's duration doesn't structurally exceed the 07:00–21:00 window once
+// the 12:00–13:00 lunch break (which a session may never cross) is accounted
+// for. A pattern that fails this can NEVER be scheduled no matter how many
+// rooms exist or how long an engine searches — the honest reason is "split
+// this course's hours across multiple days," not "no room/time available."
+function hasAnyValidStart(patterns) {
+  return patterns.some(p =>
+    CANDIDATE_STARTS.some(startMin => {
+      const endMin = startMin + p.durationMin
+      if (endMin > 1260) return false
+      if (startMin < 720 && endMin > 720) return false
+      if (startMin >= 720 && startMin < 780) return false
+      return true
+    })
+  )
+}
+
 // ── meeting patterns per entry ────────────────────────────────────────────────
 
 function buildPatterns(lecHours, labHours) {
@@ -448,7 +467,10 @@ export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPrior
       })
     } else {
       let reason
-      if (!canGoOnline) {
+      if (!hasAnyValidStart(session.patterns)) {
+        const longestPatternHrs = Math.max(...session.patterns.map(p => p.durationMin)) / 60
+        reason = `${longestPatternHrs}-hour single-day session doesn't fit any day within 07:00–21:00 around the 12:00–13:00 lunch break — split these hours across multiple days in the faculty load entry`
+      } else if (!canGoOnline) {
         reason = session.mobilityLevel === 1
           ? `No accessible ground-floor ${session.roomType} room available (labs/physical-activity subjects require a real room, never online)`
           : `No ${session.roomType} room available (labs/physical-activity subjects require a real room, never online)`
@@ -720,9 +742,12 @@ export function generateScheduleGA(entries, rooms, mobilityMap = {}, buildingPri
     const session = cand.session
     const placement = geneToPlacement(gene, cand)
     if (!placement) {
-      const reason = cand.candidateRooms.length === 0 && !cand.canGoOnline
-        ? `No ${session.roomType} room available (labs/physical-activity subjects require a real room, never online)`
-        : 'The genetic algorithm could not find a conflict-free placement within its generation budget'
+      const longestPatternHrs = Math.max(...session.patterns.map(p => p.durationMin)) / 60
+      const reason = !hasAnyValidStart(session.patterns)
+        ? `${longestPatternHrs}-hour single-day session doesn't fit any day within 07:00–21:00 around the 12:00–13:00 lunch break — split these hours across multiple days in the faculty load entry`
+        : cand.candidateRooms.length === 0 && !cand.canGoOnline
+          ? `No ${session.roomType} room available (labs/physical-activity subjects require a real room, never online)`
+          : 'The genetic algorithm could not find a conflict-free placement within its generation budget'
       unscheduled.push({ ...session, reason })
       continue
     }
@@ -808,12 +833,19 @@ function computeStaticScore(session, room, buildingPriorities) {
  */
 export async function generateScheduleORTools(entries, rooms, mobilityMap = {}, buildingPriorities = {}, options = {}) {
   const serviceUrl = options.serviceUrl || process.env.OR_TOOLS_SERVICE_URL || 'http://localhost:8091'
-  const maxTimeSeconds = options.maxTimeSeconds || 20
 
   const sessions   = buildSessions(entries, rooms, mobilityMap, buildingPriorities)
   const candidates = precomputeSessionCandidates(sessions, rooms, buildingPriorities)
 
   if (sessions.length === 0) return { scheduled: [], unscheduled: [], engine: 'ortools' }
+
+  // Scale the solve budget with problem size — a fixed 20s window that was
+  // enough for ~170 sessions left CP-SAT unable to fully complete its
+  // hint-repair + search pass once the term grew to 200+, occasionally
+  // dropping sessions the greedy engine (and thus the hint) already placed
+  // successfully. 0.3s/session keeps small terms fast while giving larger
+  // ones proportionally more room, capped so an admin never waits too long.
+  const maxTimeSeconds = options.maxTimeSeconds || Math.min(90, Math.max(20, Math.ceil(sessions.length * 0.3)))
 
   // Metadata parallel to each session's `options` array (roomIdx/patternIdx/
   // isOnline per option) — kept out of the wire payload, used only to locate
@@ -933,9 +965,12 @@ export async function generateScheduleORTools(entries, rooms, mobilityMap = {}, 
     const session = sessions[a.sessionIndex]
     if (!a.scheduled) {
       const cand = candidates[a.sessionIndex]
-      const reason = cand.candidateRooms.length === 0 && !cand.canGoOnline
-        ? `No ${session.roomType} room available (labs/physical-activity subjects require a real room, never online)`
-        : 'OR-Tools could not find a conflict-free placement within its time budget'
+      const longestPatternHrs = Math.max(...session.patterns.map(p => p.durationMin)) / 60
+      const reason = !hasAnyValidStart(session.patterns)
+        ? `${longestPatternHrs}-hour single-day session doesn't fit any day within 07:00–21:00 around the 12:00–13:00 lunch break — split these hours across multiple days in the faculty load entry`
+        : cand.candidateRooms.length === 0 && !cand.canGoOnline
+          ? `No ${session.roomType} room available (labs/physical-activity subjects require a real room, never online)`
+          : 'OR-Tools could not find a conflict-free placement within its time budget'
       unscheduled.push({ ...session, reason })
       continue
     }
