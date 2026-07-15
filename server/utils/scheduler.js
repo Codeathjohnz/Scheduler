@@ -274,7 +274,7 @@ function tryOnlineFallback(session, scheduled) {
   return bestAssignment
 }
 
-// ── main scheduling function ──────────────────────────────────────────────────
+// ── session builder (shared by both the greedy and genetic engines) ──────────
 
 /**
  * @param {object[]} entries            - faculty_load_entries rows (with `dept` = chair's department)
@@ -282,8 +282,7 @@ function tryOnlineFallback(session, scheduled) {
  * @param {object}   mobilityMap        - { instructor_id: mobility_level }
  * @param {object}   buildingPriorities - { [building]: { [program]: rank } }
  */
-export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPriorities = {}) {
-
+function buildSessions(entries, rooms, mobilityMap, buildingPriorities) {
   // Best (lowest) building-priority rank a program can reach for a given room type,
   // across all buildings offering that room type. null = no reserved priority anywhere.
   const deptRankCache = {}
@@ -302,7 +301,6 @@ export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPrior
     return best
   }
 
-  // Build all sessions from faculty load entries
   const sessions = []
   for (const entry of entries) {
     const mobility = mobilityMap[entry.assigned_instructor_id] || 3
@@ -324,6 +322,13 @@ export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPrior
       })
     }
   }
+  return sessions
+}
+
+// ── main scheduling function (greedy constructive heuristic) ─────────────────
+
+export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPriorities = {}) {
+  const sessions = buildSessions(entries, rooms, mobilityMap, buildingPriorities)
 
   // Most Constrained Variable ordering
   sessions.sort((a, b) => {
@@ -457,6 +462,301 @@ export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPrior
   }
 
   return { scheduled, unscheduled }
+}
+
+// ── genetic algorithm engine ──────────────────────────────────────────────────
+//
+// A real evolutionary alternative to the greedy engine above. Where the greedy
+// engine commits to each session's placement permanently, one at a time, and
+// can never undo an early choice that blocks a better later one, the GA
+// evaluates COMPLETE candidate schedules (chromosomes) and evolves the
+// population toward fewer constraint violations and higher soft-constraint
+// scores over many generations — able to discover beneficial trade-off swaps
+// (e.g. moving session A to a slightly worse slot so session B can take a
+// much better one) that a one-pass greedy algorithm structurally cannot.
+//
+// Chromosome: one gene per session (same session list buildSessions() returns).
+// A gene is either { type:'room', roomIdx, patternIdx, startMin },
+// { type:'online', patternIdx, startMin } (lecture-only, same rule as greedy),
+// or { type:'none' } (unscheduled). Hard constraints that depend only on the
+// session itself (room type, building authorization, accessibility) are
+// satisfied by construction — a gene only ever picks from that session's own
+// precomputed valid room list. Hard constraints that depend on OTHER
+// sessions' choices (room/instructor/section double-booking) are NOT
+// prevented by construction; they're penalized in the fitness function, and
+// selection pressure drives the population away from them across generations.
+
+const HARD_CONFLICT_PENALTY = 100000   // room/instructor/section double-booking
+const UNSCHEDULED_PENALTY   = 4000     // softer than a real conflict, but still discouraged
+
+function precomputeSessionCandidates(sessions, rooms, buildingPriorities) {
+  const validStartsCache = new Map()   // durationMin -> valid startMin[]
+  function validStartsFor(durationMin) {
+    if (validStartsCache.has(durationMin)) return validStartsCache.get(durationMin)
+    const starts = CANDIDATE_STARTS.filter(startMin => {
+      const endMin = startMin + durationMin
+      if (endMin > 1260) return false
+      if (startMin < 720 && endMin > 720) return false
+      if (startMin >= 720 && startMin < 780) return false
+      return true
+    })
+    validStartsCache.set(durationMin, starts)
+    return starts
+  }
+
+  return sessions.map(session => {
+    const compatRooms     = rooms.filter(r => r.room_type === session.roomType)
+    const authorizedRooms = filterRoomsByProgram(compatRooms, session.department, buildingPriorities)
+    const candidateRooms  = filterRoomsByMobility(authorizedRooms, session.mobilityLevel)
+    const canGoOnline      = session.sessionType === 'lecture' && !isPhysicalActivity(session.courseCode)
+    return {
+      session,
+      candidateRooms,
+      canGoOnline,
+      startsByPattern: session.patterns.map(p => validStartsFor(p.durationMin)),
+    }
+  })
+}
+
+function randomGene(cand) {
+  const canRoom   = cand.candidateRooms.length > 0
+  const options   = []
+  if (canRoom)          options.push('room')
+  if (cand.canGoOnline) options.push('online')
+  if (options.length === 0) return { type: 'none' }
+
+  const type = options[Math.floor(Math.random() * options.length)]
+  const patternIdx = Math.floor(Math.random() * cand.session.patterns.length)
+  const starts = cand.startsByPattern[patternIdx]
+  if (!starts.length) return { type: 'none' }
+  const startMin = starts[Math.floor(Math.random() * starts.length)]
+
+  if (type === 'room') {
+    const roomIdx = Math.floor(Math.random() * cand.candidateRooms.length)
+    return { type: 'room', roomIdx, patternIdx, startMin }
+  }
+  return { type: 'online', patternIdx, startMin }
+}
+
+// Convert a greedy generateSchedule() result into gene form, for seeding —
+// guarantees the GA's best-ever individual is never worse than plain greedy,
+// and gives evolution a strong starting point to refine rather than search
+// from scratch.
+function seedFromGreedy(sessions, candidates, entries, rooms, mobilityMap, buildingPriorities) {
+  const { scheduled } = generateSchedule(entries, rooms, mobilityMap, buildingPriorities)
+  const byKey = new Map(scheduled.map(s => [`${s.entryId}::${s.sessionType}`, s]))
+
+  return sessions.map((session, i) => {
+    const hit = byKey.get(`${session.entryId}::${session.sessionType}`)
+    if (!hit) return { type: 'none' }
+    const cand = candidates[i]
+    const patternIdx = session.patterns.findIndex(p =>
+      p.durationMin === hit.durationMin && p.days.join(',') === hit.days.join(',')
+    )
+    if (patternIdx === -1) return randomGene(cand)
+    if (hit.isOnline) return { type: 'online', patternIdx, startMin: hit.startMin }
+    const roomIdx = cand.candidateRooms.findIndex(r => r.id === hit.roomId)
+    if (roomIdx === -1) return randomGene(cand)
+    return { type: 'room', roomIdx, patternIdx, startMin: hit.startMin }
+  })
+}
+
+function geneToPlacement(gene, cand) {
+  if (gene.type === 'none') return null
+  const session = cand.session
+  const pattern = session.patterns[gene.patternIdx]
+  const room    = gene.type === 'online' ? ONLINE_ROOM : cand.candidateRooms[gene.roomIdx]
+  if (!pattern || !room) return null
+  return {
+    session, pattern, room,
+    roomId:       gene.type === 'online' ? null : room.id,
+    daysMask:     maskOf(pattern.days),
+    startMin:     gene.startMin,
+    durationMin:  pattern.durationMin,
+    isOnline:     gene.type === 'online',
+  }
+}
+
+function evaluateFitness(genes, candidates, buildingPriorities) {
+  const placements = []
+  for (let i = 0; i < genes.length; i++) {
+    const p = geneToPlacement(genes[i], candidates[i])
+    if (p) placements.push(p)
+  }
+
+  let hardPenalty = 0
+  for (let i = 0; i < placements.length; i++) {
+    const a = placements[i]
+    for (let j = i + 1; j < placements.length; j++) {
+      const b = placements[j]
+      if (!(a.daysMask & b.daysMask)) continue
+      if (!timeOverlap(a.startMin, a.durationMin, b.startMin, b.durationMin)) continue
+      if (a.roomId != null && a.roomId === b.roomId) hardPenalty += HARD_CONFLICT_PENALTY
+      if (a.session.instructorId && a.session.instructorId === b.session.instructorId) hardPenalty += HARD_CONFLICT_PENALTY
+      if (a.session.programYrSec && a.session.programYrSec === b.session.programYrSec) hardPenalty += HARD_CONFLICT_PENALTY
+    }
+  }
+
+  // Soft-constraint score — reuse the exact same scoreSlot() the greedy engine
+  // uses, evaluated against each placement's final instructor-mates so both
+  // engines are judged by (and optimize toward) the same quality definition.
+  let softScore = 0
+  for (const p of placements) {
+    const instrMates = p.session.instructorId
+      ? placements.filter(o => o !== p && o.session.instructorId === p.session.instructorId).map(o => ({
+          instructorId: o.session.instructorId, daysMask: o.daysMask, startMin: o.startMin, durationMin: o.durationMin,
+        }))
+      : []
+    softScore += scoreSlot(p.session, p.pattern, p.startMin, p.room, instrMates, buildingPriorities)
+  }
+
+  const unscheduledCount = genes.length - placements.length
+  const fitness = softScore - hardPenalty - unscheduledCount * UNSCHEDULED_PENALTY
+  return { fitness, hardPenalty, unscheduledCount, placements }
+}
+
+function tournamentSelect(population, fitnesses, size) {
+  let best = null, bestFit = -Infinity
+  for (let i = 0; i < size; i++) {
+    const idx = Math.floor(Math.random() * population.length)
+    if (fitnesses[idx] > bestFit) { bestFit = fitnesses[idx]; best = population[idx] }
+  }
+  return best
+}
+
+/**
+ * Same signature/output shape as generateSchedule() — a drop-in alternative
+ * engine. Options let the caller trade runtime for solution quality.
+ * @param {object} [options]
+ * @param {number} [options.populationSize=40]
+ * @param {number} [options.generations=60]
+ * @param {number} [options.mutationRate=0.08]
+ * @param {number} [options.eliteCount=3]
+ * @param {number} [options.tournamentSize=3]
+ * @param {number} [options.maxTimeMs=20000]  - hard wall-clock cap; returns the
+ *   best individual found so far if generations aren't finished in time, since
+ *   this runs synchronously on the request thread and must not hang the server.
+ * @param {number} [options.patience=20]      - stop early if the best fitness
+ *   hasn't improved for this many generations
+ */
+export function generateScheduleGA(entries, rooms, mobilityMap = {}, buildingPriorities = {}, options = {}) {
+  const {
+    populationSize = 40,
+    generations    = 60,
+    mutationRate   = 0.08,
+    eliteCount     = 3,
+    tournamentSize = 3,
+    maxTimeMs      = 20000,
+    patience       = 20,
+  } = options
+
+  const sessions   = buildSessions(entries, rooms, mobilityMap, buildingPriorities)
+  const candidates = precomputeSessionCandidates(sessions, rooms, buildingPriorities)
+
+  if (sessions.length === 0) return { scheduled: [], unscheduled: [], engine: 'genetic', generationsRun: 0 }
+
+  // Seed one individual from the greedy engine's own result (elitism then
+  // guarantees the GA never does worse than plain greedy), fill the rest of
+  // the population with random valid-structure individuals.
+  const population = [seedFromGreedy(sessions, candidates, entries, rooms, mobilityMap, buildingPriorities)]
+  while (population.length < populationSize) {
+    population.push(sessions.map((_, i) => randomGene(candidates[i])))
+  }
+
+  const startTime = Date.now()
+  let bestGenes = population[0]
+  let bestResult = evaluateFitness(bestGenes, candidates, buildingPriorities)
+  let generationsSinceImprovement = 0
+  let generationsRun = 0
+
+  for (let gen = 0; gen < generations; gen++) {
+    if (Date.now() - startTime > maxTimeMs) break
+
+    const evaluated = population.map(genes => evaluateFitness(genes, candidates, buildingPriorities))
+    const fitnesses = evaluated.map(e => e.fitness)
+
+    // Track the best individual ever seen (elitism alone should preserve it,
+    // but tracking explicitly is cheap insurance against an implementation slip)
+    let genBestIdx = 0
+    for (let i = 1; i < evaluated.length; i++) if (fitnesses[i] > fitnesses[genBestIdx]) genBestIdx = i
+    if (fitnesses[genBestIdx] > bestResult.fitness) {
+      bestResult = evaluated[genBestIdx]
+      bestGenes  = population[genBestIdx]
+      generationsSinceImprovement = 0
+    } else {
+      generationsSinceImprovement++
+    }
+
+    generationsRun = gen + 1
+    if (generationsSinceImprovement >= patience) break
+    if (gen === generations - 1) break   // last generation — no need to build a next one
+
+    // Next generation: elitism + tournament-selected crossover/mutation
+    const order = [...population.keys()].sort((a, b) => fitnesses[b] - fitnesses[a])
+    const next = order.slice(0, eliteCount).map(idx => population[idx])
+
+    while (next.length < populationSize) {
+      const parentA = tournamentSelect(population, fitnesses, tournamentSize)
+      const parentB = tournamentSelect(population, fitnesses, tournamentSize)
+      const child = sessions.map((_, i) => {
+        let gene = Math.random() < 0.5 ? parentA[i] : parentB[i]
+        if (Math.random() < mutationRate) gene = randomGene(candidates[i])
+        return gene
+      })
+      next.push(child)
+    }
+    population.length = 0
+    population.push(...next)
+  }
+
+  // Convert the best chromosome found into the same { scheduled, unscheduled }
+  // shape generateSchedule() returns, so callers can use either engine
+  // interchangeably.
+  const scheduled = []
+  const unscheduled = []
+  for (let i = 0; i < bestGenes.length; i++) {
+    const gene = bestGenes[i]
+    const cand = candidates[i]
+    const session = cand.session
+    const placement = geneToPlacement(gene, cand)
+    if (!placement) {
+      const reason = cand.candidateRooms.length === 0 && !cand.canGoOnline
+        ? `No ${session.roomType} room available (labs/physical-activity subjects require a real room, never online)`
+        : 'The genetic algorithm could not find a conflict-free placement within its generation budget'
+      unscheduled.push({ ...session, reason })
+      continue
+    }
+    scheduled.push({
+      entryId:        session.entryId,
+      instructorId:   session.instructorId,
+      instructorName: session.instructorName,
+      programYrSec:   session.programYrSec,
+      courseCode:     session.courseCode,
+      title:          session.title,
+      sessionType:    session.sessionType,
+      mobilityLevel:  session.mobilityLevel,
+      roomId:         placement.roomId,
+      roomName:       placement.isOnline ? 'Online Class' : `${placement.room.building} ${placement.room.room_number}`,
+      roomType:       placement.room.room_type,
+      floorLevel:     placement.room.floor_level,
+      isOnline:       placement.isOnline,
+      days:           placement.pattern.days,
+      daysMask:       placement.daysMask,
+      startMin:       placement.startMin,
+      durationMin:    placement.durationMin,
+      startTime:      minToTime(placement.startMin),
+      endTime:        minToTime(placement.startMin + placement.durationMin),
+    })
+  }
+
+  return {
+    scheduled, unscheduled,
+    engine: 'genetic',
+    generationsRun,
+    finalFitness: bestResult.fitness,
+    hardConflicts: bestResult.hardPenalty / HARD_CONFLICT_PENALTY,
+    runtimeMs: Date.now() - startTime,
+  }
 }
 
 // ── conflict detector (for saved schedule rows) ───────────────────────────────

@@ -196,6 +196,8 @@ export default function ScheduleGenerator() {
   const [filterType, setFilterType] = useState('all') // 'all' | 'instructor' | 'room' | 'section'
   const [unscheduled, setUnscheduled] = useState([])
   const [showUnscheduled, setShowUnscheduled] = useState(false)
+  const [engine, setEngine] = useState('greedy')   // 'greedy' | 'genetic'
+  const [lastRun, setLastRun] = useState(null)      // stats from the most recent generate call
 
   const fetchSchedules = async () => {
     setLoading(true)
@@ -215,10 +217,12 @@ export default function ScheduleGenerator() {
 
   const handleGenerate = async () => {
     if (!confirm('This will replace all existing schedules for this term. Continue?')) return
-    setGenerating(true); setUnscheduled([])
+    setGenerating(true); setUnscheduled([]); setLastRun(null)
     try {
-      const r = await api.post('/scheduling/generate', { year, semester, clear_existing: true })
-      toast.success(`Generated ${r.data.scheduled} sessions.`)
+      const r = await api.post('/scheduling/generate', { year, semester, clear_existing: true, engine })
+      setLastRun(r.data)
+      const engineLabel = r.data.engine === 'genetic' ? 'Genetic Algorithm' : 'Greedy'
+      toast.success(`${engineLabel} engine generated ${r.data.scheduled} sessions in ${r.data.engineRuntimeMs}ms.`)
       if (r.data.unscheduled > 0) {
         toast(`${r.data.unscheduled} session(s) could not be scheduled — see warnings below.`, { icon: '⚠' })
         setUnscheduled(r.data.unscheduledList)
@@ -307,6 +311,21 @@ export default function ScheduleGenerator() {
             <option value={3}>Summer</option>
           </select>
         </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Engine</label>
+          <div className="flex border-2 border-gray-200 rounded-xl overflow-hidden">
+            <button type="button" onClick={()=>setEngine('greedy')}
+              title="Fast constructive heuristic — one pass, near-instant"
+              className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='greedy'?'bg-green-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
+              Greedy (Fast)
+            </button>
+            <button type="button" onClick={()=>setEngine('genetic')}
+              title="Genetic Algorithm — evolves complete candidate schedules over many generations, may find a better arrangement at the cost of runtime"
+              className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='genetic'?'bg-purple-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
+              Genetic Algorithm
+            </button>
+          </div>
+        </div>
         <div className="flex gap-2 ml-auto flex-wrap">
           <button onClick={handleGenerate} disabled={generating}
             className="flex items-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-bold px-4 py-2.5 rounded-xl transition shadow text-sm">
@@ -346,6 +365,13 @@ export default function ScheduleGenerator() {
             <button onClick={() => {}} className="flex items-center gap-1.5 text-xs bg-red-100 text-red-700 font-semibold px-3 py-1.5 rounded-full hover:bg-red-200 transition">
               <AlertTriangle className="w-3.5 h-3.5"/> {conflicts.length} conflict{conflicts.length>1?'s':''}
             </button>
+          )}
+          {lastRun?.engine === 'genetic' && (
+            <span className="flex items-center gap-1.5 text-xs bg-purple-100 text-purple-800 font-semibold px-3 py-1.5 rounded-full"
+              title="Fitness = soft-constraint score minus heavy penalties for any conflicts or unscheduled sessions">
+              <Cpu className="w-3.5 h-3.5"/> GA: {lastRun.generationsRun} generations · fitness {lastRun.finalFitness} · {lastRun.engineRuntimeMs}ms
+              {lastRun.hardConflicts > 0 && <span className="text-red-700"> · {lastRun.hardConflicts} hard conflict{lastRun.hardConflicts>1?'s':''}!</span>}
+            </span>
           )}
         </div>
       )}

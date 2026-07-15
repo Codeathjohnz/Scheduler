@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
-import { generateSchedule, detectConflicts, minToTime, timeToMin } from '../utils/scheduler.js'
+import { generateSchedule, generateScheduleGA, detectConflicts, minToTime, timeToMin } from '../utils/scheduler.js'
 
 const router = Router()
 
@@ -41,7 +41,7 @@ router.get('/', authenticate, async (req, res) => {
 
 // ── POST /api/scheduling/generate ────────────────────────────────────────────
 router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
-  const { year = '2026-2027', semester = 1, clear_existing = true } = req.body
+  const { year = '2026-2027', semester = 1, clear_existing = true, engine = 'greedy' } = req.body
   try {
     // Only schedule entries from validated submissions
     const [validatedSubs] = await pool.query(
@@ -91,8 +91,15 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
       buildingPriorities[row.building][row.program] = row.priority
     }
 
-    // Run the scheduling engine
-    const { scheduled, unscheduled } = generateSchedule(entries, rooms, mobilityMap, buildingPriorities)
+    // Run the scheduling engine — 'genetic' evolves complete candidate
+    // schedules toward fewer conflicts/higher soft-constraint scores over
+    // many generations; 'greedy' (default) is the fast one-pass heuristic.
+    const engineStart = Date.now()
+    const result = engine === 'genetic'
+      ? generateScheduleGA(entries, rooms, mobilityMap, buildingPriorities)
+      : generateSchedule(entries, rooms, mobilityMap, buildingPriorities)
+    const { scheduled, unscheduled } = result
+    const engineRuntimeMs = Date.now() - engineStart
 
     // Persist results
     if (clear_existing) {
@@ -124,6 +131,13 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
       scheduled: scheduled.length,
       unscheduled: unscheduled.length,
       unscheduledList: unscheduled.map(u => ({ course: u.courseCode, reason: u.reason, type: u.sessionType })),
+      engine,
+      engineRuntimeMs,
+      ...(engine === 'genetic' ? {
+        generationsRun: result.generationsRun,
+        finalFitness: result.finalFitness,
+        hardConflicts: result.hardConflicts,
+      } : {}),
     })
   } catch (err) {
     res.status(500).json({ message: err.message })
