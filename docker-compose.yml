@@ -23,9 +23,19 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5000}
+      OR_TOOLS_SERVICE_URL: http://or-tools:8001
     depends_on:
       mysql:
         condition: service_healthy
+      or-tools:
+        condition: service_started
+
+  # ── Google OR-Tools CP-SAT solver microservice ────────────────────────────
+  or-tools:
+    build:
+      context: ./or-tools-service
+      dockerfile: Dockerfile
+    restart: always
 
   # ── MariaDB database ──────────────────────────────────────────────────────
   mysql:

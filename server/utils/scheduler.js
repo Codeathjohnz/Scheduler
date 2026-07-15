@@ -282,7 +282,7 @@ function tryOnlineFallback(session, scheduled) {
  * @param {object}   mobilityMap        - { instructor_id: mobility_level }
  * @param {object}   buildingPriorities - { [building]: { [program]: rank } }
  */
-function buildSessions(entries, rooms, mobilityMap, buildingPriorities) {
+export function buildSessions(entries, rooms, mobilityMap, buildingPriorities) {
   // Best (lowest) building-priority rank a program can reach for a given room type,
   // across all buildings offering that room type. null = no reserved priority anywhere.
   const deptRankCache = {}
@@ -489,7 +489,7 @@ export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPrior
 const HARD_CONFLICT_PENALTY = 100000   // room/instructor/section double-booking
 const UNSCHEDULED_PENALTY   = 4000     // softer than a real conflict, but still discouraged
 
-function precomputeSessionCandidates(sessions, rooms, buildingPriorities) {
+export function precomputeSessionCandidates(sessions, rooms, buildingPriorities) {
   const validStartsCache = new Map()   // durationMin -> valid startMin[]
   function validStartsFor(durationMin) {
     if (validStartsCache.has(durationMin)) return validStartsCache.get(durationMin)
@@ -755,6 +755,192 @@ export function generateScheduleGA(entries, rooms, mobilityMap = {}, buildingPri
     generationsRun,
     finalFitness: bestResult.fitness,
     hardConflicts: bestResult.hardPenalty / HARD_CONFLICT_PENALTY,
+    runtimeMs: Date.now() - startTime,
+  }
+}
+
+// ── OR-Tools (Google CP-SAT) engine ───────────────────────────────────────────
+//
+// Unlike the greedy and genetic engines above — which are entirely custom
+// JavaScript — this delegates the actual constraint solve to Google's
+// OR-Tools CP-SAT solver, running as a separate Python microservice
+// (or-tools-service/). Node precomputes the same candidate universe the
+// other two engines use (buildSessions + precomputeSessionCandidates) and
+// sends it as a flat list of (session, room-or-online, pattern) options;
+// the Python side builds a real constraint-programming model — NoOverlap
+// interval constraints per room/instructor/section, per day — so hard
+// constraints are a solver guarantee, not a penalty term the way the GA's
+// fitness function treats them. See or-tools-service/main.py for the model.
+//
+// The per-option score sent over only covers the parts of scoreSlot() that
+// don't depend on other sessions (building priority, mobility/floor fit) —
+// day-clustering/adjacency/gap-penalty terms are a documented simplification,
+// not modeled here yet (they'd need reified product variables per
+// instructor-pair to encode safely in CP-SAT).
+
+// Static (session+room only, no dependency on other placements) subset of
+// scoreSlot()'s scoring — the only kind of term safe to send as a per-option
+// constant to a solver that evaluates all sessions simultaneously.
+function computeStaticScore(session, room, buildingPriorities) {
+  let score = 0
+  const access = buildingAccess(room.building, session.department, buildingPriorities)
+  if (access.rank != null) score += Math.max(0, 120 - (access.rank - 1) * 25)
+
+  const mobility = session.mobilityLevel || 3
+  if (mobility === 2) {
+    if (room.floor_level === 1)      score += 20
+    else if (room.floor_level === 2) score += 10
+    else                              score -= 10
+  }
+  if (mobility <= 2 && room.is_accessible) score += 5
+
+  return score
+}
+
+/**
+ * Same signature/output shape as generateSchedule()/generateScheduleGA() —
+ * a drop-in alternative engine, except this one is async (it makes an HTTP
+ * call to the Python solver service).
+ * @param {object} [options]
+ * @param {string} [options.serviceUrl] - defaults to process.env.OR_TOOLS_SERVICE_URL
+ *   or http://localhost:8091 for local dev.
+ * @param {number} [options.maxTimeSeconds=20]
+ */
+export async function generateScheduleORTools(entries, rooms, mobilityMap = {}, buildingPriorities = {}, options = {}) {
+  const serviceUrl = options.serviceUrl || process.env.OR_TOOLS_SERVICE_URL || 'http://localhost:8091'
+  const maxTimeSeconds = options.maxTimeSeconds || 20
+
+  const sessions   = buildSessions(entries, rooms, mobilityMap, buildingPriorities)
+  const candidates = precomputeSessionCandidates(sessions, rooms, buildingPriorities)
+
+  if (sessions.length === 0) return { scheduled: [], unscheduled: [], engine: 'ortools' }
+
+  const payload = {
+    maxTimeSeconds,
+    sessions: sessions.map((session, i) => {
+      const cand = candidates[i]
+      const opts = []
+      cand.candidateRooms.forEach(room => {
+        session.patterns.forEach((pattern, patternIdx) => {
+          const starts = cand.startsByPattern[patternIdx]
+          if (!starts.length) return
+          opts.push({
+            isOnline: false,
+            roomId: room.id,
+            days: pattern.days,
+            durationMin: pattern.durationMin,
+            baseScore: computeStaticScore(session, room, buildingPriorities),
+            startOptions: starts,
+          })
+        })
+      })
+      if (cand.canGoOnline) {
+        session.patterns.forEach((pattern, patternIdx) => {
+          const starts = cand.startsByPattern[patternIdx]
+          if (!starts.length) return
+          opts.push({
+            isOnline: true,
+            roomId: null,
+            days: pattern.days,
+            durationMin: pattern.durationMin,
+            baseScore: 0,
+            startOptions: starts,
+          })
+        })
+      }
+      return { index: i, instructorId: session.instructorId, programYrSec: session.programYrSec, options: opts }
+    }),
+  }
+
+  const startTime = Date.now()
+  let response
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), (maxTimeSeconds + 15) * 1000)
+    response = await fetch(`${serviceUrl}/solve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+    clearTimeout(timeout)
+  } catch (err) {
+    throw new Error(`OR-Tools service unreachable at ${serviceUrl}: ${err.message}`)
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(`OR-Tools service returned ${response.status}: ${text.slice(0, 300)}`)
+  }
+  const result = await response.json()
+
+  if (!['OPTIMAL', 'FEASIBLE'].includes(result.status)) {
+    throw new Error(`OR-Tools could not solve this term (status: ${result.status}).`)
+  }
+
+  // Rebuild each option's (room, pattern) objects from the same candidates
+  // array Node already has — the Python side only echoes back indices, it
+  // never sees or needs to know about room/pattern objects directly.
+  const optionRefs = sessions.map((session, i) => {
+    const cand = candidates[i]
+    const refs = []
+    cand.candidateRooms.forEach(room => {
+      session.patterns.forEach((pattern, patternIdx) => {
+        if (!cand.startsByPattern[patternIdx].length) return
+        refs.push({ isOnline: false, room, pattern })
+      })
+    })
+    if (cand.canGoOnline) {
+      session.patterns.forEach((pattern, patternIdx) => {
+        if (!cand.startsByPattern[patternIdx].length) return
+        refs.push({ isOnline: true, room: ONLINE_ROOM, pattern })
+      })
+    }
+    return refs
+  })
+
+  const scheduled = []
+  const unscheduled = []
+  for (const a of result.assignments) {
+    const session = sessions[a.sessionIndex]
+    if (!a.scheduled) {
+      const cand = candidates[a.sessionIndex]
+      const reason = cand.candidateRooms.length === 0 && !cand.canGoOnline
+        ? `No ${session.roomType} room available (labs/physical-activity subjects require a real room, never online)`
+        : 'OR-Tools could not find a conflict-free placement within its time budget'
+      unscheduled.push({ ...session, reason })
+      continue
+    }
+    const ref = optionRefs[a.sessionIndex][a.optionIndex]
+    const daysMask = maskOf(ref.pattern.days)
+    scheduled.push({
+      entryId:        session.entryId,
+      instructorId:   session.instructorId,
+      instructorName: session.instructorName,
+      programYrSec:   session.programYrSec,
+      courseCode:     session.courseCode,
+      title:          session.title,
+      sessionType:    session.sessionType,
+      mobilityLevel:  session.mobilityLevel,
+      roomId:         ref.isOnline ? null : ref.room.id,
+      roomName:       ref.isOnline ? 'Online Class' : `${ref.room.building} ${ref.room.room_number}`,
+      roomType:       ref.room.room_type,
+      floorLevel:     ref.room.floor_level,
+      isOnline:       ref.isOnline,
+      days:           ref.pattern.days,
+      daysMask,
+      startMin:       a.startMin,
+      durationMin:    ref.pattern.durationMin,
+      startTime:      minToTime(a.startMin),
+      endTime:        minToTime(a.startMin + ref.pattern.durationMin),
+    })
+  }
+
+  return {
+    scheduled, unscheduled,
+    engine: 'ortools',
+    solverStatus: result.status,
+    objectiveValue: result.objectiveValue,
+    solverWallTimeSeconds: result.wallTimeSeconds,
     runtimeMs: Date.now() - startTime,
   }
 }

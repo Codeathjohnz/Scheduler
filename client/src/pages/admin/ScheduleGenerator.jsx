@@ -196,7 +196,7 @@ export default function ScheduleGenerator() {
   const [filterType, setFilterType] = useState('all') // 'all' | 'instructor' | 'room' | 'section'
   const [unscheduled, setUnscheduled] = useState([])
   const [showUnscheduled, setShowUnscheduled] = useState(false)
-  const [engine, setEngine] = useState('greedy')   // 'greedy' | 'genetic'
+  const [engine, setEngine] = useState('greedy')   // 'greedy' | 'genetic' | 'ortools'
   const [lastRun, setLastRun] = useState(null)      // stats from the most recent generate call
 
   const fetchSchedules = async () => {
@@ -221,7 +221,7 @@ export default function ScheduleGenerator() {
     try {
       const r = await api.post('/scheduling/generate', { year, semester, clear_existing: true, engine })
       setLastRun(r.data)
-      const engineLabel = r.data.engine === 'genetic' ? 'Genetic Algorithm' : 'Greedy'
+      const engineLabel = r.data.engine === 'genetic' ? 'Genetic Algorithm' : r.data.engine === 'ortools' ? 'Google OR-Tools' : 'Greedy'
       toast.success(`${engineLabel} engine generated ${r.data.scheduled} sessions in ${r.data.engineRuntimeMs}ms.`)
       if (r.data.unscheduled > 0) {
         toast(`${r.data.unscheduled} session(s) could not be scheduled — see warnings below.`, { icon: '⚠' })
@@ -324,6 +324,11 @@ export default function ScheduleGenerator() {
               className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='genetic'?'bg-purple-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
               Genetic Algorithm
             </button>
+            <button type="button" onClick={()=>setEngine('ortools')}
+              title="Google OR-Tools (CP-SAT) — constraint-programming solver, guarantees no room/instructor/section double-booking by construction"
+              className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='ortools'?'bg-blue-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
+              OR-Tools
+            </button>
           </div>
         </div>
         <div className="flex gap-2 ml-auto flex-wrap">
@@ -371,6 +376,12 @@ export default function ScheduleGenerator() {
               title="Fitness = soft-constraint score minus heavy penalties for any conflicts or unscheduled sessions">
               <Cpu className="w-3.5 h-3.5"/> GA: {lastRun.generationsRun} generations · fitness {lastRun.finalFitness} · {lastRun.engineRuntimeMs}ms
               {lastRun.hardConflicts > 0 && <span className="text-red-700"> · {lastRun.hardConflicts} hard conflict{lastRun.hardConflicts>1?'s':''}!</span>}
+            </span>
+          )}
+          {lastRun?.engine === 'ortools' && (
+            <span className="flex items-center gap-1.5 text-xs bg-blue-100 text-blue-800 font-semibold px-3 py-1.5 rounded-full"
+              title="CP-SAT constraint solver — status OPTIMAL/FEASIBLE means all hard constraints (no double-booking) were satisfied by construction">
+              <Cpu className="w-3.5 h-3.5"/> OR-Tools: {lastRun.solverStatus} · objective {lastRun.objectiveValue} · {lastRun.engineRuntimeMs}ms
             </span>
           )}
         </div>

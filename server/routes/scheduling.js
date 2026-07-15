@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
-import { generateSchedule, generateScheduleGA, detectConflicts, minToTime, timeToMin } from '../utils/scheduler.js'
+import { generateSchedule, generateScheduleGA, generateScheduleORTools, detectConflicts, minToTime, timeToMin } from '../utils/scheduler.js'
 
 const router = Router()
 
@@ -93,11 +93,19 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
 
     // Run the scheduling engine — 'genetic' evolves complete candidate
     // schedules toward fewer conflicts/higher soft-constraint scores over
-    // many generations; 'greedy' (default) is the fast one-pass heuristic.
+    // many generations; 'ortools' delegates to Google OR-Tools' CP-SAT
+    // constraint solver (a separate Python microservice) for a real
+    // constraint-programming guarantee of no hard-constraint violations;
+    // 'greedy' (default) is the fast one-pass heuristic.
     const engineStart = Date.now()
-    const result = engine === 'genetic'
-      ? generateScheduleGA(entries, rooms, mobilityMap, buildingPriorities)
-      : generateSchedule(entries, rooms, mobilityMap, buildingPriorities)
+    let result
+    if (engine === 'genetic') {
+      result = generateScheduleGA(entries, rooms, mobilityMap, buildingPriorities)
+    } else if (engine === 'ortools') {
+      result = await generateScheduleORTools(entries, rooms, mobilityMap, buildingPriorities)
+    } else {
+      result = generateSchedule(entries, rooms, mobilityMap, buildingPriorities)
+    }
     const { scheduled, unscheduled } = result
     const engineRuntimeMs = Date.now() - engineStart
 
@@ -137,6 +145,11 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
         generationsRun: result.generationsRun,
         finalFitness: result.finalFitness,
         hardConflicts: result.hardConflicts,
+      } : {}),
+      ...(engine === 'ortools' ? {
+        solverStatus: result.solverStatus,
+        objectiveValue: result.objectiveValue,
+        solverWallTimeSeconds: result.solverWallTimeSeconds,
       } : {}),
     })
   } catch (err) {
