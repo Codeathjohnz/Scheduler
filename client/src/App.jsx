@@ -112,6 +112,7 @@ export default function App() {
           <Route path="/qa" element={<RoleRoute role={ROLES.QUALITY_ASSURANCE}><QALayout /></RoleRoute>}>
             <Route index element={<QADashboard />} />
             <Route path="review" element={<QAReview />} />
+            <Route path="signature" element={<SignatureSettings />} />
           </Route>
 
           {/* VPAA */}

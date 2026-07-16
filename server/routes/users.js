@@ -18,14 +18,16 @@ router.get('/', authenticate, authorize('admin'), async (req, res) => {
   }
 })
 
-// Dean/VPAA e-signature — a small PNG uploaded once, stored as a data URI
-// and attached to the Faculty Loading DOCX export once they confirm a
-// submission (see server/utils/facultyLoadingDocx.js). Registered before the
-// generic '/:id' routes below so 'signature' is never captured as an :id.
+// Dean/VPAA/Quality Assurance e-signature — a small PNG uploaded once,
+// stored as a data URI and attached to the Faculty Loading DOCX export once
+// they confirm a submission (see server/utils/facultyLoadingDocx.js — QA is
+// this system's "Chief Curriculum Planning and Development" reviewer on
+// that form). Registered before the generic '/:id' routes below so
+// 'signature' is never captured as an :id.
 const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024   // 2MB decoded
 
 // GET /api/users/signature — own current signature (for the upload preview)
-router.get('/signature', authenticate, authorize('dean', 'vpaa'), async (req, res) => {
+router.get('/signature', authenticate, authorize('dean', 'vpaa', 'quality_assurance'), async (req, res) => {
   try {
     const [[row]] = await pool.query('SELECT signature_image FROM users WHERE id = ?', [req.user.id])
     res.json({ signature_image: row?.signature_image || null })
@@ -35,7 +37,7 @@ router.get('/signature', authenticate, authorize('dean', 'vpaa'), async (req, re
 })
 
 // PUT /api/users/signature — body: { data: "data:image/png;base64,..." }
-router.put('/signature', authenticate, authorize('dean', 'vpaa'), async (req, res) => {
+router.put('/signature', authenticate, authorize('dean', 'vpaa', 'quality_assurance'), async (req, res) => {
   const { data } = req.body
   // PNG only — supports transparency (needed so the signature reads
   // cleanly over the printed line rather than as a white rectangle) and
@@ -58,7 +60,7 @@ router.put('/signature', authenticate, authorize('dean', 'vpaa'), async (req, re
 })
 
 // DELETE /api/users/signature
-router.delete('/signature', authenticate, authorize('dean', 'vpaa'), async (req, res) => {
+router.delete('/signature', authenticate, authorize('dean', 'vpaa', 'quality_assurance'), async (req, res) => {
   try {
     await pool.query('UPDATE users SET signature_image = NULL WHERE id = ?', [req.user.id])
     res.json({ message: 'Signature removed.' })

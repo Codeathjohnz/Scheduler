@@ -150,14 +150,20 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
   // at all, since its approval chain is currently broken regardless of
   // which stage sent it back.
   const [[submission]] = await pool.query(
-    `SELECT status, dean_action_at FROM submissions
+    `SELECT status, dean_action_at, qa_action_at FROM submissions
      WHERE chair_id = ? AND academic_year = ? AND semester = ?
      ORDER BY created_at DESC LIMIT 1`,
     [chairId, academicYear, semester]
   )
   const PAST_DEAN = new Set(['pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled'])
+  // "Reviewed by" on the form is Chief Curriculum Planning and Development —
+  // the same person/role as this system's "Quality Assurance" (QA sits
+  // between Dean and VPAA in the approval chain exactly like Chief CPD sits
+  // between "Checked by" and "Approved by" on the form; confirmed with the
+  // user rather than assumed).
+  const PAST_QA = new Set(['pending_vpaa', 'pending_admin', 'validated', 'scheduled'])
   const PAST_VPAA = new Set(['pending_admin', 'validated', 'scheduled'])
-  let dean = null, vpaa = null
+  let dean = null, reviewer = null, vpaa = null
   if (submission && PAST_DEAN.has(submission.status)) {
     const [[row]] = await pool.query(
       "SELECT name, signature_image FROM users WHERE role = 'dean' AND department = ? LIMIT 1",
@@ -165,19 +171,24 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
     )
     dean = row || null
   }
+  if (submission && PAST_QA.has(submission.status)) {
+    const [[row]] = await pool.query("SELECT name, signature_image FROM users WHERE role = 'quality_assurance' LIMIT 1")
+    reviewer = row || null
+  }
   if (submission && PAST_VPAA.has(submission.status)) {
     const [[row]] = await pool.query("SELECT name, signature_image FROM users WHERE role = 'vpaa' LIMIT 1")
     vpaa = row || null
   }
   const deanSignatureMarker = dean?.signature_image ? 'SIGNATURE_MARKER_DEAN' : ''
+  const reviewerSignatureMarker = reviewer?.signature_image ? 'SIGNATURE_MARKER_REVIEWER' : ''
   const vpaaSignatureMarker = vpaa?.signature_image ? 'SIGNATURE_MARKER_VPAA' : ''
 
-  // Per-page footer: PC's and Dean's Initial + Date (Chief CPD has no
-  // matching role and stays blank, same as the last-page block). PC's
+  // Per-page footer: PC's, Dean's, and Chief CPD's Initial + Date. PC's
   // initial always shows — the chair is the one generating this report
-  // right now — dated today; Dean's only shows once genuinely confirmed
-  // (see `dean` above), using the signature image if uploaded or plain
-  // text initials as a fallback, dated from their actual confirm action.
+  // right now — dated today; Dean's and Chief CPD's only show once
+  // genuinely confirmed (see `dean`/`reviewer` above), using the signature
+  // image if uploaded or plain text initials as a fallback, dated from
+  // their actual confirm action.
   const initialsOf = (name) => (name || '').split(/\s+/).filter(Boolean).map(w => w[0].toUpperCase() + '.').join('')
   const formatDate = (d) => {
     const dt = new Date(d)
@@ -188,6 +199,9 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
   const deanFooterSignatureMarker = dean?.signature_image ? 'SIGNATURE_MARKER_DEAN_FOOTER' : ''
   const deanInitialDisplay = dean ? (deanFooterSignatureMarker || initialsOf(dean.name)) : ''
   const deanDateDisplay = dean && submission?.dean_action_at ? formatDate(submission.dean_action_at) : '/         /'
+  const reviewerFooterSignatureMarker = reviewer?.signature_image ? 'SIGNATURE_MARKER_REVIEWER_FOOTER' : ''
+  const reviewerInitialDisplay = reviewer ? (reviewerFooterSignatureMarker || initialsOf(reviewer.name)) : ''
+  const reviewerDateDisplay = reviewer && submission?.qa_action_at ? formatDate(submission.qa_action_at) : '/         /'
 
   const [entries] = await pool.query(`
     SELECT fle.*, u.id AS instructor_id, u.name AS instructor_name
@@ -321,13 +335,17 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
     chairName: chair.name,
     instructors,
     deanName: dean?.name || '',
+    reviewerName: reviewer?.name || '',
     vpaaName: vpaa?.name || '',
     deanSignatureMarker,
+    reviewerSignatureMarker,
     vpaaSignatureMarker,
     chairInitial,
     deanInitialDisplay,
+    reviewerInitialDisplay,
     chairDateDisplay,
     deanDateDisplay,
+    reviewerDateDisplay,
   })
 
   const renderedZip = doc.getZip()
@@ -335,6 +353,13 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
     embedSignatureImage(renderedZip, {
       markerValue: deanSignatureMarker, pngDataUri: dean.signature_image,
       rId: 'rIdSigDean', mediaFilename: 'signature_dean.png', docPrId: 9001,
+      targetXmlPath: 'word/document.xml', relsPath: 'word/_rels/document.xml.rels',
+    })
+  }
+  if (reviewer?.signature_image) {
+    embedSignatureImage(renderedZip, {
+      markerValue: reviewerSignatureMarker, pngDataUri: reviewer.signature_image,
+      rId: 'rIdSigReviewer', mediaFilename: 'signature_reviewer.png', docPrId: 9004,
       targetXmlPath: 'word/document.xml', relsPath: 'word/_rels/document.xml.rels',
     })
   }
@@ -349,6 +374,13 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
     embedSignatureImage(renderedZip, {
       markerValue: deanFooterSignatureMarker, pngDataUri: dean.signature_image,
       rId: 'rIdSigDeanFooter', mediaFilename: 'signature_dean_footer.png', docPrId: 9003,
+      targetXmlPath: 'word/footer2.xml', relsPath: 'word/_rels/footer2.xml.rels', size: 'footer',
+    })
+  }
+  if (reviewer?.signature_image && reviewerFooterSignatureMarker) {
+    embedSignatureImage(renderedZip, {
+      markerValue: reviewerFooterSignatureMarker, pngDataUri: reviewer.signature_image,
+      rId: 'rIdSigReviewerFooter', mediaFilename: 'signature_reviewer_footer.png', docPrId: 9005,
       targetXmlPath: 'word/footer2.xml', relsPath: 'word/_rels/footer2.xml.rels', size: 'footer',
     })
   }
