@@ -29,6 +29,9 @@ export const usersAPI = {
   create:  (data)       => api.post('/users', data),
   update:  (id, data)   => api.put(`/users/${id}`, data),
   remove:  (id)         => api.delete(`/users/${id}`),
+  getSignature:    ()        => api.get('/users/signature'),
+  setSignature:    (dataUri) => api.put('/users/signature', { data: dataUri }),
+  removeSignature: ()        => api.delete('/users/signature'),
 }
 
 export const submissionsAPI = {

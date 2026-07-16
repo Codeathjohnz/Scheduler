@@ -354,6 +354,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `mobility_level` tinyint(4) DEFAULT 3,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `email` varchar(150) DEFAULT NULL,
+  `signature_image` longtext DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `username` (`username`)
 ) ENGINE=InnoDB AUTO_INCREMENT=63 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

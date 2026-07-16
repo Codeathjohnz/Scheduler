@@ -1,10 +1,11 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from '../components/common/Sidebar.jsx'
-import { LayoutDashboard, ClipboardCheck } from 'lucide-react'
+import { LayoutDashboard, ClipboardCheck, PenTool } from 'lucide-react'
 
 const nav = [
   { to: '/vpaa', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/vpaa/review', icon: ClipboardCheck, label: 'Review Submissions' },
+  { to: '/vpaa/signature', icon: PenTool, label: 'My E-Signature' },
 ]
 
 export default function VPAALayout() {

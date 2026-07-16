@@ -29,10 +29,119 @@ function fmtTotal(n, hasEntries) {
   return hasEntries ? round2(n) : ''
 }
 
+// ── e-signature embedding ─────────────────────────────────────────────────
+//
+// docxtemplater has no built-in image support, and the community image
+// module (docxtemplater-image-module-free) pulls in an unmaintained xmldom
+// with several unpatched critical CVEs — not worth it for embedding one
+// small PNG. Since this project already fully controls the template's XML
+// (see the build script that produced faculty-loading-template.docx), the
+// simpler and safer route is: render the text normally with docxtemplater,
+// then manually splice a real <w:drawing> into the rendered zip wherever a
+// unique marker string was rendered in place of {deanSignatureMarker} /
+// {vpaaSignatureMarker}. A marker only ever gets rendered when a real
+// signature is available (see buildInstructorData below), so an
+// unconfirmed submission leaves that cell blank exactly as before.
+
+function pngDimensions(buf) {
+  if (buf.length < 24 || buf.toString('ascii', 12, 16) !== 'IHDR') {
+    throw new Error('Not a valid PNG (missing IHDR chunk).')
+  }
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) }
+}
+
+// Target a fixed physical height so the signature reads consistently
+// regardless of the uploaded image's resolution; cap width so an unusually
+// wide signature can't overflow its table cell (~2.8in wide in the template).
+const SIGNATURE_HEIGHT_EMU = 320040   // 0.35in
+const SIGNATURE_MAX_WIDTH_EMU = 2200000  // ~2.4in
+
+function signatureEmuSize(pxWidth, pxHeight) {
+  let cy = SIGNATURE_HEIGHT_EMU
+  let cx = Math.round(cy * (pxWidth / pxHeight))
+  if (cx > SIGNATURE_MAX_WIDTH_EMU) {
+    cx = SIGNATURE_MAX_WIDTH_EMU
+    cy = Math.round(cx * (pxHeight / pxWidth))
+  }
+  return { cx, cy }
+}
+
+function drawingXml({ rId, docPrId, cx, cy }) {
+  return (
+    `<w:r><w:drawing>` +
+    `<wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0">` +
+    `<wp:extent cx="${cx}" cy="${cy}"/>` +
+    `<wp:effectExtent l="0" t="0" r="0" b="0"/>` +
+    `<wp:docPr id="${docPrId}" name="Signature${docPrId}"/>` +
+    `<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr>` +
+    `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
+    `<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:nvPicPr><pic:cNvPr id="${docPrId}" name="Signature${docPrId}"/><pic:cNvPicPr/></pic:nvPicPr>` +
+    `<pic:blipFill><a:blip r:embed="${rId}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
+    `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`
+  )
+}
+
+// Splices one signature image into `zip` (a rendered docxtemplater PizZip)
+// wherever `markerValue` appears as a lone run's text — added as a new
+// media file + relationship, matching how the template's own logo is wired.
+function embedSignatureImage(zip, markerValue, pngDataUri, rId, mediaFilename, docPrId) {
+  const base64 = pngDataUri.replace(/^data:image\/png;base64,/, '')
+  const buf = Buffer.from(base64, 'base64')
+  const { width, height } = pngDimensions(buf)
+  const { cx, cy } = signatureEmuSize(width, height)
+
+  zip.file(`word/media/${mediaFilename}`, buf, { binary: true })
+
+  const relsPath = 'word/_rels/document.xml.rels'
+  const relsXml = zip.file(relsPath).asText()
+  const newRel = `<Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${mediaFilename}"/>`
+  zip.file(relsPath, relsXml.replace('</Relationships>', `${newRel}</Relationships>`))
+
+  const docPath = 'word/document.xml'
+  const docXml = zip.file(docPath).asText()
+  // docxtemplater renders a plain-string tag substitution as
+  // <w:t xml:space="preserve">value</w:t> (it always adds xml:space, even
+  // without leading/trailing whitespace), not the bare <w:t> the template
+  // source had before rendering.
+  const markerRun = `<w:r><w:t xml:space="preserve">${markerValue}</w:t></w:r>`
+  if (!docXml.includes(markerRun)) {
+    throw new Error(`Signature marker ${markerValue} not found in rendered document — template may be out of sync.`)
+  }
+  zip.file(docPath, docXml.replace(markerRun, drawingXml({ rId, docPrId, cx, cy })))
+}
+
 export async function generateFacultyLoadingDocx({ chairId, academicYear, semester, collegeName, programName }) {
   const [chairRows] = await pool.query('SELECT name, department FROM users WHERE id = ?', [chairId])
   const chair = chairRows[0]
   if (!chair) throw new Error('Chair not found.')
+
+  // Dean confirmation is scoped by department (one dean per college); VPAA
+  // endorsement is university-wide (one VPAA account). A signature is only
+  // ever attached once that specific person has actually confirmed THIS
+  // term's submission — never pre-emptively from just having one on file.
+  const [[submission]] = await pool.query(
+    `SELECT dean_action_at, vpaa_action_at FROM submissions
+     WHERE chair_id = ? AND academic_year = ? AND semester = ?
+     ORDER BY created_at DESC LIMIT 1`,
+    [chairId, academicYear, semester]
+  )
+  let dean = null, vpaa = null
+  if (submission?.dean_action_at) {
+    const [[row]] = await pool.query(
+      "SELECT name, signature_image FROM users WHERE role = 'dean' AND department = ? LIMIT 1",
+      [chair.department]
+    )
+    dean = row || null
+  }
+  if (submission?.vpaa_action_at) {
+    const [[row]] = await pool.query("SELECT name, signature_image FROM users WHERE role = 'vpaa' LIMIT 1")
+    vpaa = row || null
+  }
+  const deanSignatureMarker = dean?.signature_image ? 'SIGNATURE_MARKER_DEAN' : ''
+  const vpaaSignatureMarker = vpaa?.signature_image ? 'SIGNATURE_MARKER_VPAA' : ''
 
   const [entries] = await pool.query(`
     SELECT fle.*, u.id AS instructor_id, u.name AS instructor_name
@@ -162,7 +271,22 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
   const zip = new PizZip(templateBuf)
   const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true })
 
-  doc.render({ chairName: chair.name, instructors })
+  doc.render({
+    chairName: chair.name,
+    instructors,
+    deanName: dean?.name || '',
+    vpaaName: vpaa?.name || '',
+    deanSignatureMarker,
+    vpaaSignatureMarker,
+  })
 
-  return doc.getZip().generate({ type: 'nodebuffer' })
+  const renderedZip = doc.getZip()
+  if (dean?.signature_image) {
+    embedSignatureImage(renderedZip, deanSignatureMarker, dean.signature_image, 'rIdSigDean', 'signature_dean.png', 9001)
+  }
+  if (vpaa?.signature_image) {
+    embedSignatureImage(renderedZip, vpaaSignatureMarker, vpaa.signature_image, 'rIdSigVpaa', 'signature_vpaa.png', 9002)
+  }
+
+  return renderedZip.generate({ type: 'nodebuffer' })
 }

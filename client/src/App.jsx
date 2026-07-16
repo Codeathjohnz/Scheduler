@@ -27,6 +27,9 @@ import VPAALayout from './layouts/VPAALayout.jsx'
 import VPAADashboard from './pages/vpaa/Dashboard.jsx'
 import VPAAReview from './pages/vpaa/Review.jsx'
 
+// Shared pages
+import SignatureSettings from './pages/shared/SignatureSettings.jsx'
+
 // Admin pages
 import AdminLayout from './layouts/AdminLayout.jsx'
 import AdminDashboard from './pages/admin/Dashboard.jsx'
@@ -102,6 +105,7 @@ export default function App() {
             <Route path="confirm-load" element={<InstructorConfirmLoad />} />
             <Route path="specialty" element={<InstructorSpecialty />} />
             <Route path="accessibility" element={<InstructorAccessibility />} />
+            <Route path="signature" element={<SignatureSettings />} />
           </Route>
 
           {/* Quality Assurance */}
@@ -114,6 +118,7 @@ export default function App() {
           <Route path="/vpaa" element={<RoleRoute role={ROLES.VPAA}><VPAALayout /></RoleRoute>}>
             <Route index element={<VPAADashboard />} />
             <Route path="review" element={<VPAAReview />} />
+            <Route path="signature" element={<SignatureSettings />} />
           </Route>
 
           {/* Admin/Registrar */}

@@ -18,6 +18,55 @@ router.get('/', authenticate, authorize('admin'), async (req, res) => {
   }
 })
 
+// Dean/VPAA e-signature — a small PNG uploaded once, stored as a data URI
+// and attached to the Faculty Loading DOCX export once they confirm a
+// submission (see server/utils/facultyLoadingDocx.js). Registered before the
+// generic '/:id' routes below so 'signature' is never captured as an :id.
+const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024   // 2MB decoded
+
+// GET /api/users/signature — own current signature (for the upload preview)
+router.get('/signature', authenticate, authorize('dean', 'vpaa'), async (req, res) => {
+  try {
+    const [[row]] = await pool.query('SELECT signature_image FROM users WHERE id = ?', [req.user.id])
+    res.json({ signature_image: row?.signature_image || null })
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.', error: err.message })
+  }
+})
+
+// PUT /api/users/signature — body: { data: "data:image/png;base64,..." }
+router.put('/signature', authenticate, authorize('dean', 'vpaa'), async (req, res) => {
+  const { data } = req.body
+  // PNG only — supports transparency (needed so the signature reads
+  // cleanly over the printed line rather than as a white rectangle) and
+  // is already a declared content type in the DOCX template, so embedding
+  // it later needs no extra template edits.
+  const match = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(data || '')
+  if (!match) {
+    return res.status(400).json({ message: 'Please upload a PNG image (transparent background recommended).' })
+  }
+  const decodedSize = Buffer.byteLength(match[1], 'base64')
+  if (decodedSize > MAX_SIGNATURE_BYTES) {
+    return res.status(400).json({ message: 'Signature image is too large (max 2MB).' })
+  }
+  try {
+    await pool.query('UPDATE users SET signature_image = ? WHERE id = ?', [data, req.user.id])
+    res.json({ message: 'Signature saved.' })
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.', error: err.message })
+  }
+})
+
+// DELETE /api/users/signature
+router.delete('/signature', authenticate, authorize('dean', 'vpaa'), async (req, res) => {
+  try {
+    await pool.query('UPDATE users SET signature_image = NULL WHERE id = ?', [req.user.id])
+    res.json({ message: 'Signature removed.' })
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.', error: err.message })
+  }
+})
+
 // GET single user
 router.get('/:id', authenticate, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.id !== +req.params.id) {
