@@ -120,23 +120,35 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
 
   // Dean confirmation is scoped by department (one dean per college); VPAA
   // endorsement is university-wide (one VPAA account). A signature is only
-  // ever attached once that specific person has actually confirmed THIS
-  // term's submission — never pre-emptively from just having one on file.
+  // ever attached once that specific person's approval is CURRENTLY in
+  // effect for this term's submission.
+  //
+  // dean_action_at/vpaa_action_at are NOT reliable "confirmed" signals on
+  // their own — /:id/dean and /:id/vpaa in submissions.js stamp that same
+  // timestamp on a REJECTION too (action !== 'confirm'/'endorse' just sets
+  // status to 'returned' with the same NOW()). The only trustworthy signal
+  // is the submission's current status: it only reads as one of the stages
+  // past Dean/VPAA if that stage actually passed, not if it got returned
+  // there or anywhere upstream — a 'returned' submission gets no signatures
+  // at all, since its approval chain is currently broken regardless of
+  // which stage sent it back.
   const [[submission]] = await pool.query(
-    `SELECT dean_action_at, vpaa_action_at FROM submissions
+    `SELECT status FROM submissions
      WHERE chair_id = ? AND academic_year = ? AND semester = ?
      ORDER BY created_at DESC LIMIT 1`,
     [chairId, academicYear, semester]
   )
+  const PAST_DEAN = new Set(['pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled'])
+  const PAST_VPAA = new Set(['pending_admin', 'validated', 'scheduled'])
   let dean = null, vpaa = null
-  if (submission?.dean_action_at) {
+  if (submission && PAST_DEAN.has(submission.status)) {
     const [[row]] = await pool.query(
       "SELECT name, signature_image FROM users WHERE role = 'dean' AND department = ? LIMIT 1",
       [chair.department]
     )
     dean = row || null
   }
-  if (submission?.vpaa_action_at) {
+  if (submission && PAST_VPAA.has(submission.status)) {
     const [[row]] = await pool.query("SELECT name, signature_image FROM users WHERE role = 'vpaa' LIMIT 1")
     vpaa = row || null
   }
