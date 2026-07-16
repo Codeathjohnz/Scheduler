@@ -5,13 +5,14 @@ import toast from 'react-hot-toast'
 import {
   Plus, Pencil, Trash2, X, Eye, EyeOff,
   Users, ShieldCheck, GraduationCap, BookOpen, UserCircle, Loader2, Search,
-  Mail, Building2, Star, IdCard, Award, BadgeCheck
+  Mail, Building2, Star, IdCard, Award, BadgeCheck, Bookmark
 } from 'lucide-react'
 
 const ROLES = [
   { value: 'admin',      label: 'Admin / Registrar',  icon: ShieldCheck,    color: 'bg-red-100 text-red-700' },
   { value: 'chair',      label: 'Program Chair',       icon: GraduationCap,  color: 'bg-blue-100 text-blue-700' },
   { value: 'dean',       label: 'Dean',                icon: Award,          color: 'bg-indigo-100 text-indigo-700' },
+  { value: 'chief_cpd',  label: 'Chief Curriculum Planning and Development', icon: Bookmark, color: 'bg-cyan-100 text-cyan-700' },
   { value: 'quality_assurance', label: 'Quality Assurance', icon: BadgeCheck, color: 'bg-teal-100 text-teal-700' },
   { value: 'vpaa',       label: 'VPAA',                icon: UserCircle,     color: 'bg-purple-100 text-purple-700' },
   { value: 'instructor', label: 'Instructor',           icon: BookOpen,       color: 'bg-amber-100 text-amber-700' },
