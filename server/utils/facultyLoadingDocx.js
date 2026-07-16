@@ -135,33 +135,34 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
   const chair = chairRows[0]
   if (!chair) throw new Error('Chair not found.')
 
-  // Dean confirmation is scoped by department (one dean per college); VPAA
-  // endorsement is university-wide (one VPAA account). A signature is only
-  // ever attached once that specific person's approval is CURRENTLY in
-  // effect for this term's submission.
+  // Dean confirmation is scoped by department (one dean per college); Chief
+  // CPD and VPAA endorsement are university-wide (one account each). A
+  // signature is only ever attached once that specific person's approval is
+  // CURRENTLY in effect for this term's submission.
   //
-  // dean_action_at/vpaa_action_at are NOT reliable "confirmed" signals on
-  // their own — /:id/dean and /:id/vpaa in submissions.js stamp that same
-  // timestamp on a REJECTION too (action !== 'confirm'/'endorse' just sets
-  // status to 'returned' with the same NOW()). The only trustworthy signal
-  // is the submission's current status: it only reads as one of the stages
-  // past Dean/VPAA if that stage actually passed, not if it got returned
-  // there or anywhere upstream — a 'returned' submission gets no signatures
-  // at all, since its approval chain is currently broken regardless of
-  // which stage sent it back.
+  // dean_action_at/chief_cpd_action_at/vpaa_action_at are NOT reliable
+  // "confirmed" signals on their own — /:id/dean, /:id/chief-cpd, and
+  // /:id/vpaa in submissions.js stamp that same timestamp on a REJECTION
+  // too (action !== 'confirm'/'endorse' just sets status to 'returned' with
+  // the same NOW()). The only trustworthy signal is the submission's
+  // current status: it only reads as one of the stages past a given role if
+  // that stage actually passed, not if it got returned there or anywhere
+  // upstream — a 'returned' submission gets no signatures at all, since its
+  // approval chain is currently broken regardless of which stage sent it back.
   const [[submission]] = await pool.query(
-    `SELECT status, dean_action_at, qa_action_at FROM submissions
+    `SELECT status, dean_action_at, chief_cpd_action_at FROM submissions
      WHERE chair_id = ? AND academic_year = ? AND semester = ?
      ORDER BY created_at DESC LIMIT 1`,
     [chairId, academicYear, semester]
   )
-  const PAST_DEAN = new Set(['pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled'])
+  const PAST_DEAN = new Set(['pending_chief_cpd', 'pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled'])
   // "Reviewed by" on the form is Chief Curriculum Planning and Development —
-  // the same person/role as this system's "Quality Assurance" (QA sits
-  // between Dean and VPAA in the approval chain exactly like Chief CPD sits
-  // between "Checked by" and "Approved by" on the form; confirmed with the
-  // user rather than assumed).
-  const PAST_QA = new Set(['pending_vpaa', 'pending_admin', 'validated', 'scheduled'])
+  // a distinct role from Quality Assurance (confirmed with the user), sitting
+  // between Dean and QA in the approval chain: chair -> dean -> chief_cpd ->
+  // quality_assurance -> vpaa -> admin. QA itself has no signature line on
+  // this form (the VPAA's own title already reads "...and Quality
+  // Assurance"), so it isn't queried here at all.
+  const PAST_CHIEF_CPD = new Set(['pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled'])
   const PAST_VPAA = new Set(['pending_admin', 'validated', 'scheduled'])
   let dean = null, reviewer = null, vpaa = null
   if (submission && PAST_DEAN.has(submission.status)) {
@@ -171,8 +172,8 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
     )
     dean = row || null
   }
-  if (submission && PAST_QA.has(submission.status)) {
-    const [[row]] = await pool.query("SELECT name, signature_image FROM users WHERE role = 'quality_assurance' LIMIT 1")
+  if (submission && PAST_CHIEF_CPD.has(submission.status)) {
+    const [[row]] = await pool.query("SELECT name, signature_image FROM users WHERE role = 'chief_cpd' LIMIT 1")
     reviewer = row || null
   }
   if (submission && PAST_VPAA.has(submission.status)) {
@@ -201,7 +202,7 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
   const deanDateDisplay = dean && submission?.dean_action_at ? formatDate(submission.dean_action_at) : '/         /'
   const reviewerFooterSignatureMarker = reviewer?.signature_image ? 'SIGNATURE_MARKER_REVIEWER_FOOTER' : ''
   const reviewerInitialDisplay = reviewer ? (reviewerFooterSignatureMarker || initialsOf(reviewer.name)) : ''
-  const reviewerDateDisplay = reviewer && submission?.qa_action_at ? formatDate(submission.qa_action_at) : '/         /'
+  const reviewerDateDisplay = reviewer && submission?.chief_cpd_action_at ? formatDate(submission.chief_cpd_action_at) : '/         /'
 
   const [entries] = await pool.query(`
     SELECT fle.*, u.id AS instructor_id, u.name AS instructor_name

@@ -6,8 +6,8 @@ import { useAuth } from '../../context/AuthContext.jsx'
 import { submissionsAPI } from '../../services/api.js'
 
 const STATUS_LABEL = {
-  pending_dean:      'Pending Your Review',
-  pending_chief_cpd: 'Confirmed — with Chief CPD',
+  pending_dean:      'With Dean',
+  pending_chief_cpd: 'Pending Your Review',
   pending_qa:        'Confirmed — with QA',
   pending_vpaa:      'Confirmed — with VPAA',
   pending_admin:     'Confirmed — with Admin',
@@ -18,7 +18,7 @@ const STATUS_LABEL = {
 
 const STATUS_STYLE = {
   pending_dean:      'bg-amber-100 text-amber-800 border border-amber-200',
-  pending_chief_cpd: 'bg-green-100 text-green-800 border border-green-200',
+  pending_chief_cpd: 'bg-amber-100 text-amber-800 border border-amber-200',
   pending_qa:        'bg-green-100 text-green-800 border border-green-200',
   pending_vpaa:      'bg-green-100 text-green-800 border border-green-200',
   pending_admin:     'bg-green-100 text-green-800 border border-green-200',
@@ -27,25 +27,25 @@ const STATUS_STYLE = {
   scheduled:         'bg-purple-100 text-purple-800 border border-purple-200',
 }
 
-export default function DeanDashboard() {
+export default function ChiefCPDDashboard() {
   const { user } = useAuth()
   const [submissions, setSubmissions] = useState([])
 
   useEffect(() => {
-    submissionsAPI.getForDean()
+    submissionsAPI.getForChiefCPD()
       .then(r => setSubmissions(r.data))
       .catch(() => {})
   }, [])
 
-  const pending   = submissions.filter(s => s.status === 'pending_dean')
-  const confirmed = submissions.filter(s => ['pending_chief_cpd', 'pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled'].includes(s.status))
+  const pending   = submissions.filter(s => s.status === 'pending_chief_cpd')
+  const confirmed = submissions.filter(s => ['pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled'].includes(s.status))
   const returned  = submissions.filter(s => s.status === 'returned')
 
   return (
     <div>
       <PageHeader
         title={`Welcome, ${user?.name}`}
-        subtitle={`Dean, ${user?.department} – Review faculty load submissions confirmed by all instructors in your college.`}
+        subtitle="Chief Curriculum Planning and Development – Review faculty load submissions confirmed by the Dean before they reach Quality Assurance."
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

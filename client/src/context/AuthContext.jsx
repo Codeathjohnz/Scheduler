@@ -5,6 +5,7 @@ const AuthContext = createContext(null)
 export const ROLES = {
   CHAIR:             'chair',
   DEAN:              'dean',
+  CHIEF_CPD:         'chief_cpd',
   QUALITY_ASSURANCE: 'quality_assurance',
   VPAA:              'vpaa',
   ADMIN:             'admin',

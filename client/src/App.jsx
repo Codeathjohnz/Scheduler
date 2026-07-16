@@ -17,6 +17,11 @@ import DeanLayout from './layouts/DeanLayout.jsx'
 import DeanDashboard from './pages/dean/Dashboard.jsx'
 import DeanReview from './pages/dean/Review.jsx'
 
+// Chief Curriculum Planning and Development pages
+import ChiefCPDLayout from './layouts/ChiefCPDLayout.jsx'
+import ChiefCPDDashboard from './pages/chiefcpd/Dashboard.jsx'
+import ChiefCPDReview from './pages/chiefcpd/Review.jsx'
+
 // Quality Assurance pages
 import QALayout from './layouts/QALayout.jsx'
 import QADashboard from './pages/qa/Dashboard.jsx'
@@ -68,6 +73,7 @@ function RootRedirect() {
   const paths = {
     [ROLES.CHAIR]: '/chair',
     [ROLES.DEAN]: '/dean',
+    [ROLES.CHIEF_CPD]: '/chief-cpd',
     [ROLES.QUALITY_ASSURANCE]: '/qa',
     [ROLES.VPAA]: '/vpaa',
     [ROLES.ADMIN]: '/admin',
@@ -108,11 +114,17 @@ export default function App() {
             <Route path="signature" element={<SignatureSettings />} />
           </Route>
 
+          {/* Chief Curriculum Planning and Development */}
+          <Route path="/chief-cpd" element={<RoleRoute role={ROLES.CHIEF_CPD}><ChiefCPDLayout /></RoleRoute>}>
+            <Route index element={<ChiefCPDDashboard />} />
+            <Route path="review" element={<ChiefCPDReview />} />
+            <Route path="signature" element={<SignatureSettings />} />
+          </Route>
+
           {/* Quality Assurance */}
           <Route path="/qa" element={<RoleRoute role={ROLES.QUALITY_ASSURANCE}><QALayout /></RoleRoute>}>
             <Route index element={<QADashboard />} />
             <Route path="review" element={<QAReview />} />
-            <Route path="signature" element={<SignatureSettings />} />
           </Route>
 
           {/* VPAA */}

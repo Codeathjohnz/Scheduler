@@ -7,6 +7,7 @@ const users = [
   { username: 'admin',      password: 'admin123',  role: 'admin',      name: 'Ana Cruz',        department: "Registrar's Office" },
   { username: 'chair',      password: 'chair123',  role: 'chair',      name: 'Maria Santos',    department: 'CEIT' },
   { username: 'dean',       password: 'dean123',   role: 'dean',       name: 'Dr. Ramon Flores', department: 'CCIS' },
+  { username: 'chiefcpd',   password: 'chiefcpd123', role: 'chief_cpd', name: 'Dr. Corazon Villanueva', department: 'Office of Curriculum Planning and Development' },
   { username: 'qa',         password: 'qa123',     role: 'quality_assurance', name: 'Dr. Liza Marfil', department: 'Office of Quality Assurance' },
   { username: 'vpaa',       password: 'vpaa123',   role: 'vpaa',       name: 'Dr. Juan Reyes',  department: 'Office of the VPAA' },
   { username: 'instructor', password: 'instr123',  role: 'instructor', name: 'Michelle Elape',  department: 'CEIT' },

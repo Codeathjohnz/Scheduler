@@ -4,11 +4,9 @@ import toast from 'react-hot-toast'
 import { CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2, ClipboardList, Search, Undo2 } from 'lucide-react'
 import { submissionsAPI } from '../../services/api.js'
 
-const REVERTIBLE_STATUSES = new Set(['pending_chief_cpd', 'pending_qa', 'pending_vpaa', 'pending_admin', 'validated'])
-
 const STATUS_LABEL = {
-  pending_dean:      'Pending Review',
-  pending_chief_cpd: 'Confirmed — with Chief CPD',
+  pending_dean:      'With Dean',
+  pending_chief_cpd: 'Pending Review',
   pending_qa:        'Confirmed — with QA',
   pending_vpaa:      'Confirmed — with VPAA',
   pending_admin:     'Confirmed — with Admin',
@@ -19,7 +17,7 @@ const STATUS_LABEL = {
 
 const STATUS_STYLE = {
   pending_dean:      'bg-amber-100 text-amber-800 border border-amber-200',
-  pending_chief_cpd: 'bg-green-100 text-green-800 border border-green-200',
+  pending_chief_cpd: 'bg-amber-100 text-amber-800 border border-amber-200',
   pending_qa:        'bg-green-100 text-green-800 border border-green-200',
   pending_vpaa:      'bg-green-100 text-green-800 border border-green-200',
   pending_admin:     'bg-green-100 text-green-800 border border-green-200',
@@ -36,7 +34,9 @@ const YEAR_COLORS = {
   4: 'bg-purple-50 border-purple-200 text-purple-800',
 }
 
-export default function DeanReview() {
+const REVERTIBLE_STATUSES = new Set(['pending_qa', 'pending_vpaa', 'pending_admin', 'validated'])
+
+export default function ChiefCPDReview() {
   const [submissions, setSubmissions] = useState([])
   const [loading, setLoading]         = useState(true)
   const [expanded, setExpanded]       = useState(null)
@@ -46,7 +46,7 @@ export default function DeanReview() {
 
   const fetchSubmissions = () => {
     setLoading(true)
-    submissionsAPI.getForDean()
+    submissionsAPI.getForChiefCPD()
       .then(r => setSubmissions(r.data))
       .catch(() => toast.error('Failed to load submissions.'))
       .finally(() => setLoading(false))
@@ -72,7 +72,7 @@ export default function DeanReview() {
   const handleAction = async (id, action) => {
     setActing(id)
     try {
-      await submissionsAPI.deanAction(id, action)
+      await submissionsAPI.chiefCpdAction(id, action)
       toast.success(
         action === 'confirm'
           ? 'Submission confirmed and forwarded to Quality Assurance.'
@@ -88,11 +88,11 @@ export default function DeanReview() {
   }
 
   const handleRevert = async (id) => {
-    if (!confirm('Revert this back to Pending Dean Review? Quality Assurance, VPAA, and Admin will need to review it again from scratch.')) return
+    if (!confirm('Revert this back to Pending Chief CPD Review? Quality Assurance, VPAA, and Admin will need to review it again.')) return
     setActing(id)
     try {
-      await submissionsAPI.deanRevert(id)
-      toast.success('Submission reverted to Pending Dean Review.')
+      await submissionsAPI.chiefCpdRevert(id)
+      toast.success('Submission reverted to Pending Chief CPD Review.')
       fetchSubmissions()
       setExpanded(null)
     } catch (err) {
@@ -102,14 +102,14 @@ export default function DeanReview() {
     }
   }
 
-  const pending = submissions.filter(s => s.status === 'pending_dean')
-  const others  = submissions.filter(s => s.status !== 'pending_dean')
+  const pending = submissions.filter(s => s.status === 'pending_chief_cpd')
+  const others  = submissions.filter(s => s.status !== 'pending_chief_cpd')
 
   return (
     <div>
       <PageHeader
         title="Review Submissions"
-        subtitle="Confirm or return faculty load submissions once every instructor in your college has confirmed."
+        subtitle="Confirm or return faculty load submissions once the Dean has confirmed them."
       />
 
       {loading ? (
@@ -120,7 +120,7 @@ export default function DeanReview() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center py-20 text-gray-400">
           <ClipboardList className="w-12 h-12 mb-3 opacity-30" />
           <p className="font-semibold text-gray-500">No submissions yet.</p>
-          <p className="text-sm mt-1 text-gray-400">Submissions appear here once all instructors have confirmed.</p>
+          <p className="text-sm mt-1 text-gray-400">Submissions appear here once the Dean has confirmed them.</p>
         </div>
       ) : (
         <div className="space-y-6">
@@ -315,7 +315,7 @@ function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpa
             </table>
           )}
 
-          {onAction && sub.status === 'pending_dean' && (
+          {onAction && sub.status === 'pending_chief_cpd' && (
             <div className="flex gap-3">
               <button
                 onClick={() => onAction('confirm')}
@@ -336,9 +336,9 @@ function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpa
             </div>
           )}
 
-          {sub.status !== 'pending_dean' && sub.dean_action_at && (
+          {sub.status !== 'pending_chief_cpd' && sub.chief_cpd_action_at && (
             <p className="text-xs text-gray-400 mt-2">
-              {STATUS_LABEL[sub.status]} on {new Date(sub.dean_action_at).toLocaleDateString()}
+              {STATUS_LABEL[sub.status]} on {new Date(sub.chief_cpd_action_at).toLocaleDateString()}
             </p>
           )}
 

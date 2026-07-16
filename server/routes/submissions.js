@@ -28,7 +28,8 @@ router.post('/', authenticate, authorize('chair'), async (req, res) => {
 
 // Chair: submit faculty load — starts the approval chain at Instructor
 // confirmation (every assigned instructor must confirm their own load before
-// it moves to Dean -> Quality Assurance -> VPAA -> Admin).
+// it moves to Dean -> Chief Curriculum Planning and Development -> Quality
+// Assurance -> VPAA -> Admin).
 router.post('/from-faculty-load', authenticate, authorize('chair'), async (req, res) => {
   const { academic_year, semester } = req.body
   if (!academic_year || !semester) {
@@ -218,9 +219,9 @@ router.get('/dean', authenticate, authorize('dean'), async (req, res) => {
             AND fle.semester = s.semester) AS faculty_entry_count
       FROM submissions s
       JOIN users u ON s.chair_id = u.id
-      WHERE s.status IN ('pending_dean', 'pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled', 'returned') ${deptFilter}
+      WHERE s.status IN ('pending_dean', 'pending_chief_cpd', 'pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled', 'returned') ${deptFilter}
       ORDER BY
-        FIELD(s.status, 'pending_dean', 'returned', 'pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled'),
+        FIELD(s.status, 'pending_dean', 'returned', 'pending_chief_cpd', 'pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled'),
         s.created_at DESC
     `, params)
     const mapped = rows.map(r => ({
@@ -236,7 +237,7 @@ router.get('/dean', authenticate, authorize('dean'), async (req, res) => {
 // Dean: confirm or return
 router.patch('/:id/dean', authenticate, authorize('dean'), async (req, res) => {
   const { action } = req.body
-  const status = action === 'confirm' ? 'pending_qa' : 'returned'
+  const status = action === 'confirm' ? 'pending_chief_cpd' : 'returned'
   try {
     await pool.query('UPDATE submissions SET status = ?, dean_action_at = NOW() WHERE id = ?', [status, req.params.id])
     res.json({ message: `Submission ${status}.` })
@@ -246,12 +247,12 @@ router.patch('/:id/dean', authenticate, authorize('dean'), async (req, res) => {
 })
 
 // Dean: revert a previous confirm — sends the whole chain back to
-// pending_dean, undoing QA/VPAA/Admin's downstream actions too (their old
-// action timestamps are cleared so they see a clean slate once the Dean
-// re-confirms). Blocked once a schedule has actually been generated from
-// this data ('scheduled') — an admin would need to clear that schedule
-// first, since real room/time assignments would otherwise be left
-// pointing at data that's no longer dean-approved.
+// pending_dean, undoing Chief CPD/QA/VPAA/Admin's downstream actions too
+// (their old action timestamps are cleared so they see a clean slate once
+// the Dean re-confirms). Blocked once a schedule has actually been
+// generated from this data ('scheduled') — an admin would need to clear
+// that schedule first, since real room/time assignments would otherwise be
+// left pointing at data that's no longer dean-approved.
 router.patch('/:id/dean-revert', authenticate, authorize('dean'), async (req, res) => {
   try {
     const [[dean]] = await pool.query('SELECT department FROM users WHERE id = ?', [req.user.id])
@@ -267,17 +268,86 @@ router.patch('/:id/dean-revert', authenticate, authorize('dean'), async (req, re
     if (sub.status === 'scheduled') {
       return res.status(409).json({ message: 'A schedule has already been generated from this submission — an admin must clear it before you can revert.' })
     }
-    const REVERTIBLE = new Set(['pending_qa', 'pending_vpaa', 'pending_admin', 'validated'])
+    const REVERTIBLE = new Set(['pending_chief_cpd', 'pending_qa', 'pending_vpaa', 'pending_admin', 'validated'])
     if (!REVERTIBLE.has(sub.status)) {
       return res.status(409).json({ message: `Cannot revert a submission that is currently ${sub.status.replace(/_/g, ' ')}.` })
     }
     await pool.query(
       `UPDATE submissions SET status = 'pending_dean',
-         dean_action_at = NULL, qa_action_at = NULL, vpaa_action_at = NULL, admin_action_at = NULL
+         dean_action_at = NULL, chief_cpd_action_at = NULL, qa_action_at = NULL, vpaa_action_at = NULL, admin_action_at = NULL
        WHERE id = ?`,
       [req.params.id]
     )
-    res.json({ message: 'Submission reverted to Pending Dean Review. QA, VPAA, and Admin will need to review it again.' })
+    res.json({ message: 'Submission reverted to Pending Dean Review. Chief CPD, QA, VPAA, and Admin will need to review it again.' })
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.', error: err.message })
+  }
+})
+
+// Chief Curriculum Planning and Development: all submissions at or past
+// their stage (unscoped — one person handles all colleges, like VPAA/QA)
+router.get('/chief-cpd', authenticate, authorize('chief_cpd'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT s.*,
+        u.name       AS chair_name,
+        u.department AS chair_dept,
+        (SELECT COUNT(*) FROM submission_entries se WHERE se.submission_id = s.id) AS manual_entry_count,
+        (SELECT COUNT(*) FROM faculty_load_entries fle
+          WHERE fle.chair_id = s.chair_id
+            AND fle.academic_year = s.academic_year
+            AND fle.semester = s.semester) AS faculty_entry_count
+      FROM submissions s
+      JOIN users u ON s.chair_id = u.id
+      WHERE s.status IN ('pending_chief_cpd', 'pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled', 'returned')
+      ORDER BY
+        FIELD(s.status, 'pending_chief_cpd', 'returned', 'pending_qa', 'pending_vpaa', 'pending_admin', 'validated', 'scheduled'),
+        s.created_at DESC
+    `)
+    const mapped = rows.map(r => ({
+      ...r,
+      entry_count: r.submission_type === 'faculty_load' ? r.faculty_entry_count : r.manual_entry_count,
+    }))
+    res.json(mapped)
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.', error: err.message })
+  }
+})
+
+// Chief CPD: confirm or return
+router.patch('/:id/chief-cpd', authenticate, authorize('chief_cpd'), async (req, res) => {
+  const { action } = req.body
+  const status = action === 'confirm' ? 'pending_qa' : 'returned'
+  try {
+    await pool.query('UPDATE submissions SET status = ?, chief_cpd_action_at = NOW() WHERE id = ?', [status, req.params.id])
+    res.json({ message: `Submission ${status}.` })
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.', error: err.message })
+  }
+})
+
+// Chief CPD: revert a previous confirm — sends it back to pending_chief_cpd,
+// undoing QA/VPAA/Admin's downstream actions (Dean's own confirm is left
+// untouched, since it isn't Chief CPD's to undo). Same 'scheduled' guard as
+// the Dean's revert.
+router.patch('/:id/chief-cpd-revert', authenticate, authorize('chief_cpd'), async (req, res) => {
+  try {
+    const [[sub]] = await pool.query('SELECT status FROM submissions WHERE id = ?', [req.params.id])
+    if (!sub) return res.status(404).json({ message: 'Submission not found.' })
+    if (sub.status === 'scheduled') {
+      return res.status(409).json({ message: 'A schedule has already been generated from this submission — an admin must clear it before you can revert.' })
+    }
+    const REVERTIBLE = new Set(['pending_qa', 'pending_vpaa', 'pending_admin', 'validated'])
+    if (!REVERTIBLE.has(sub.status)) {
+      return res.status(409).json({ message: `Cannot revert a submission that is currently ${sub.status.replace(/_/g, ' ')}.` })
+    }
+    await pool.query(
+      `UPDATE submissions SET status = 'pending_chief_cpd',
+         chief_cpd_action_at = NULL, qa_action_at = NULL, vpaa_action_at = NULL, admin_action_at = NULL
+       WHERE id = ?`,
+      [req.params.id]
+    )
+    res.json({ message: 'Submission reverted to Pending Chief CPD Review. QA, VPAA, and Admin will need to review it again.' })
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
   }
@@ -329,7 +399,7 @@ router.get('/my-status', authenticate, authorize('chair'), async (req, res) => {
   const { year, semester } = req.query
   try {
     const [[row]] = await pool.query(
-      `SELECT id, status, created_at, dean_action_at, qa_action_at, vpaa_action_at, submission_type
+      `SELECT id, status, created_at, dean_action_at, chief_cpd_action_at, qa_action_at, vpaa_action_at, submission_type
        FROM submissions
        WHERE chair_id = ? AND academic_year = ? AND semester = ?
        ORDER BY created_at DESC LIMIT 1`,
@@ -400,8 +470,8 @@ router.get('/vpaa', authenticate, authorize('vpaa'), async (req, res) => {
   }
 })
 
-// VPAA / Admin / Chair / Dean / QA: get entries for a submission
-router.get('/:id/entries', authenticate, authorize('vpaa', 'admin', 'chair', 'dean', 'quality_assurance'), async (req, res) => {
+// VPAA / Admin / Chair / Dean / Chief CPD / QA: get entries for a submission
+router.get('/:id/entries', authenticate, authorize('vpaa', 'admin', 'chair', 'dean', 'chief_cpd', 'quality_assurance'), async (req, res) => {
   try {
     const [[sub]] = await pool.query('SELECT * FROM submissions WHERE id = ?', [req.params.id])
     if (!sub) return res.status(404).json({ message: 'Submission not found.' })
