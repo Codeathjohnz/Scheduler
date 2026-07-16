@@ -8,6 +8,7 @@ import { GraduationCap, Eye, EyeOff, Loader2 } from 'lucide-react'
 const ROLE_PATHS = {
   [ROLES.CHAIR]:             '/chair',
   [ROLES.DEAN]:              '/dean',
+  [ROLES.CHIEF_CPD]:         '/chief-cpd',
   [ROLES.QUALITY_ASSURANCE]: '/qa',
   [ROLES.VPAA]:              '/vpaa',
   [ROLES.ADMIN]:             '/admin',
@@ -19,6 +20,7 @@ const QUICK_LOGINS = [
   { label: 'Admin',        username: 'admin',      password: 'admin123' },
   { label: 'Program Chair',username: 'chair',      password: 'chair123' },
   { label: 'Dean',         username: 'dean',       password: 'dean123'  },
+  { label: 'Chief CPD',    username: 'chiefcpd',   password: 'chiefcpd123' },
   { label: 'Quality Assurance', username: 'qa',    password: 'qa123'    },
   { label: 'VPAA',         username: 'vpaa',       password: 'vpaa123'  },
   { label: 'Instructor',   username: 'instructor', password: 'instr123' },
