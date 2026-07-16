@@ -52,15 +52,20 @@ function pngDimensions(buf) {
 
 // Target a fixed physical height so the signature reads consistently
 // regardless of the uploaded image's resolution; cap width so an unusually
-// wide signature can't overflow its table cell (~2.8in wide in the template).
-const SIGNATURE_HEIGHT_EMU = 320040   // 0.35in
-const SIGNATURE_MAX_WIDTH_EMU = 2200000  // ~2.4in
+// wide signature can't overflow its table cell. Two sizes: the full
+// signature on the last-page block, and a smaller one for the per-page
+// footer's compact "Initial" cell (~1.7in wide).
+const SIGNATURE_SIZES = {
+  full:   { heightEmu: 320040, maxWidthEmu: 2200000 },   // 0.35in tall, ~2.4in cap
+  footer: { heightEmu: 160020, maxWidthEmu: 1300000 },   // 0.175in tall, ~1.4in cap
+}
 
-function signatureEmuSize(pxWidth, pxHeight) {
-  let cy = SIGNATURE_HEIGHT_EMU
+function signatureEmuSize(pxWidth, pxHeight, size = 'full') {
+  const { heightEmu, maxWidthEmu } = SIGNATURE_SIZES[size]
+  let cy = heightEmu
   let cx = Math.round(cy * (pxWidth / pxHeight))
-  if (cx > SIGNATURE_MAX_WIDTH_EMU) {
-    cx = SIGNATURE_MAX_WIDTH_EMU
+  if (cx > maxWidthEmu) {
+    cx = maxWidthEmu
     cy = Math.round(cx * (pxHeight / pxWidth))
   }
   return { cx, cy }
@@ -85,32 +90,44 @@ function drawingXml({ rId, docPrId, cx, cy }) {
 }
 
 // Splices one signature image into `zip` (a rendered docxtemplater PizZip)
-// wherever `markerValue` appears as a lone run's text — added as a new
-// media file + relationship, matching how the template's own logo is wired.
-function embedSignatureImage(zip, markerValue, pngDataUri, rId, mediaFilename, docPrId) {
+// wherever `markerValue` appears as a lone run's text in `targetXmlPath` —
+// added as a new media file + relationship in that part's OWN _rels file
+// (each OOXML part — document.xml, footer2.xml, etc. — has its own
+// independent relationship namespace; a footer's r:id is meaningless in
+// document.xml.rels and vice versa). Creates the rels file fresh if the
+// part didn't already have one (footer2.xml has none in the source template).
+function embedSignatureImage(zip, {
+  markerValue, pngDataUri, rId, mediaFilename, docPrId, targetXmlPath, relsPath, size = 'full',
+}) {
   const base64 = pngDataUri.replace(/^data:image\/png;base64,/, '')
   const buf = Buffer.from(base64, 'base64')
   const { width, height } = pngDimensions(buf)
-  const { cx, cy } = signatureEmuSize(width, height)
+  const { cx, cy } = signatureEmuSize(width, height, size)
 
   zip.file(`word/media/${mediaFilename}`, buf, { binary: true })
 
-  const relsPath = 'word/_rels/document.xml.rels'
-  const relsXml = zip.file(relsPath).asText()
+  const existingRelsFile = zip.file(relsPath)
+  const relsXml = existingRelsFile
+    ? existingRelsFile.asText()
+    : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
   const newRel = `<Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${mediaFilename}"/>`
   zip.file(relsPath, relsXml.replace('</Relationships>', `${newRel}</Relationships>`))
 
-  const docPath = 'word/document.xml'
-  const docXml = zip.file(docPath).asText()
+  const targetXml = zip.file(targetXmlPath).asText()
   // docxtemplater renders a plain-string tag substitution as
   // <w:t xml:space="preserve">value</w:t> (it always adds xml:space, even
   // without leading/trailing whitespace), not the bare <w:t> the template
-  // source had before rendering.
-  const markerRun = `<w:r><w:t xml:space="preserve">${markerValue}</w:t></w:r>`
-  if (!docXml.includes(markerRun)) {
-    throw new Error(`Signature marker ${markerValue} not found in rendered document — template may be out of sync.`)
+  // source had before rendering. The run itself may or may not carry a
+  // <w:rPr> before that <w:t> depending on the source cell (the footer's
+  // Initial cell has one for font size; the document.xml course row
+  // doesn't) — match either shape rather than assuming one.
+  const escaped = markerValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const markerRunPattern = new RegExp(`<w:r>(?:(?!</w:r>)[\\s\\S])*?<w:t xml:space="preserve">${escaped}</w:t></w:r>`)
+  const match = markerRunPattern.exec(targetXml)
+  if (!match) {
+    throw new Error(`Signature marker ${markerValue} not found in rendered ${targetXmlPath} — template may be out of sync.`)
   }
-  zip.file(docPath, docXml.replace(markerRun, drawingXml({ rId, docPrId, cx, cy })))
+  zip.file(targetXmlPath, targetXml.replace(markerRunPattern, drawingXml({ rId, docPrId, cx, cy })))
 }
 
 export async function generateFacultyLoadingDocx({ chairId, academicYear, semester, collegeName, programName }) {
@@ -133,7 +150,7 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
   // at all, since its approval chain is currently broken regardless of
   // which stage sent it back.
   const [[submission]] = await pool.query(
-    `SELECT status FROM submissions
+    `SELECT status, dean_action_at FROM submissions
      WHERE chair_id = ? AND academic_year = ? AND semester = ?
      ORDER BY created_at DESC LIMIT 1`,
     [chairId, academicYear, semester]
@@ -154,6 +171,23 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
   }
   const deanSignatureMarker = dean?.signature_image ? 'SIGNATURE_MARKER_DEAN' : ''
   const vpaaSignatureMarker = vpaa?.signature_image ? 'SIGNATURE_MARKER_VPAA' : ''
+
+  // Per-page footer: PC's and Dean's Initial + Date (Chief CPD has no
+  // matching role and stays blank, same as the last-page block). PC's
+  // initial always shows — the chair is the one generating this report
+  // right now — dated today; Dean's only shows once genuinely confirmed
+  // (see `dean` above), using the signature image if uploaded or plain
+  // text initials as a fallback, dated from their actual confirm action.
+  const initialsOf = (name) => (name || '').split(/\s+/).filter(Boolean).map(w => w[0].toUpperCase() + '.').join('')
+  const formatDate = (d) => {
+    const dt = new Date(d)
+    return `${String(dt.getMonth() + 1).padStart(2, '0')}/${String(dt.getDate()).padStart(2, '0')}/${dt.getFullYear()}`
+  }
+  const chairInitial = initialsOf(chair.name)
+  const chairDateDisplay = formatDate(new Date())
+  const deanFooterSignatureMarker = dean?.signature_image ? 'SIGNATURE_MARKER_DEAN_FOOTER' : ''
+  const deanInitialDisplay = dean ? (deanFooterSignatureMarker || initialsOf(dean.name)) : ''
+  const deanDateDisplay = dean && submission?.dean_action_at ? formatDate(submission.dean_action_at) : '/         /'
 
   const [entries] = await pool.query(`
     SELECT fle.*, u.id AS instructor_id, u.name AS instructor_name
@@ -290,14 +324,33 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
     vpaaName: vpaa?.name || '',
     deanSignatureMarker,
     vpaaSignatureMarker,
+    chairInitial,
+    deanInitialDisplay,
+    chairDateDisplay,
+    deanDateDisplay,
   })
 
   const renderedZip = doc.getZip()
   if (dean?.signature_image) {
-    embedSignatureImage(renderedZip, deanSignatureMarker, dean.signature_image, 'rIdSigDean', 'signature_dean.png', 9001)
+    embedSignatureImage(renderedZip, {
+      markerValue: deanSignatureMarker, pngDataUri: dean.signature_image,
+      rId: 'rIdSigDean', mediaFilename: 'signature_dean.png', docPrId: 9001,
+      targetXmlPath: 'word/document.xml', relsPath: 'word/_rels/document.xml.rels',
+    })
   }
   if (vpaa?.signature_image) {
-    embedSignatureImage(renderedZip, vpaaSignatureMarker, vpaa.signature_image, 'rIdSigVpaa', 'signature_vpaa.png', 9002)
+    embedSignatureImage(renderedZip, {
+      markerValue: vpaaSignatureMarker, pngDataUri: vpaa.signature_image,
+      rId: 'rIdSigVpaa', mediaFilename: 'signature_vpaa.png', docPrId: 9002,
+      targetXmlPath: 'word/document.xml', relsPath: 'word/_rels/document.xml.rels',
+    })
+  }
+  if (dean?.signature_image && deanFooterSignatureMarker) {
+    embedSignatureImage(renderedZip, {
+      markerValue: deanFooterSignatureMarker, pngDataUri: dean.signature_image,
+      rId: 'rIdSigDeanFooter', mediaFilename: 'signature_dean_footer.png', docPrId: 9003,
+      targetXmlPath: 'word/footer2.xml', relsPath: 'word/_rels/footer2.xml.rels', size: 'footer',
+    })
   }
 
   return renderedZip.generate({ type: 'nodebuffer' })
