@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import toast from 'react-hot-toast'
-import { CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2, ClipboardList, Search } from 'lucide-react'
+import { CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2, ClipboardList, Search, Undo2 } from 'lucide-react'
 import { submissionsAPI } from '../../services/api.js'
+
+const REVERTIBLE_STATUSES = new Set(['pending_qa', 'pending_vpaa', 'pending_admin', 'validated'])
 
 const STATUS_LABEL = {
   pending_dean:  'Pending Review',
@@ -83,6 +85,21 @@ export default function DeanReview() {
     }
   }
 
+  const handleRevert = async (id) => {
+    if (!confirm('Revert this back to Pending Dean Review? Quality Assurance, VPAA, and Admin will need to review it again from scratch.')) return
+    setActing(id)
+    try {
+      await submissionsAPI.deanRevert(id)
+      toast.success('Submission reverted to Pending Dean Review.')
+      fetchSubmissions()
+      setExpanded(null)
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Revert failed. Please try again.')
+    } finally {
+      setActing(null)
+    }
+  }
+
   const pending = submissions.filter(s => s.status === 'pending_dean')
   const others  = submissions.filter(s => s.status !== 'pending_dean')
 
@@ -140,9 +157,10 @@ export default function DeanReview() {
                     expanded={expanded === sub.id}
                     entries={entries[sub.id]}
                     loadingEntries={loadingEntries === sub.id}
-                    acting={false}
+                    acting={acting === sub.id}
                     onExpand={() => handleExpand(sub.id)}
                     onAction={null}
+                    onRevert={() => handleRevert(sub.id)}
                   />
                 ))}
               </div>
@@ -154,7 +172,7 @@ export default function DeanReview() {
   )
 }
 
-function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpand, onAction }) {
+function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpand, onAction, onRevert }) {
   const [search, setSearch] = useState('')
   const [yearFilter, setYearFilter] = useState('all')
 
@@ -319,6 +337,22 @@ function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpa
           {sub.status !== 'pending_dean' && sub.dean_action_at && (
             <p className="text-xs text-gray-400 mt-2">
               {STATUS_LABEL[sub.status]} on {new Date(sub.dean_action_at).toLocaleDateString()}
+            </p>
+          )}
+
+          {onRevert && REVERTIBLE_STATUSES.has(sub.status) && (
+            <button
+              onClick={onRevert}
+              disabled={acting}
+              className="flex items-center gap-2 bg-white hover:bg-amber-50 border-2 border-gray-200 hover:border-amber-300 text-gray-600 hover:text-amber-700 text-sm font-semibold px-5 py-2.5 rounded-xl transition mt-3"
+            >
+              {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Undo2 className="w-4 h-4" />}
+              Revert My Confirmation
+            </button>
+          )}
+          {onRevert && sub.status === 'scheduled' && (
+            <p className="text-xs text-amber-600 mt-3">
+              A schedule has already been generated from this submission — an admin must clear it before you can revert.
             </p>
           )}
         </div>

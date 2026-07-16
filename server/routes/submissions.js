@@ -245,6 +245,44 @@ router.patch('/:id/dean', authenticate, authorize('dean'), async (req, res) => {
   }
 })
 
+// Dean: revert a previous confirm — sends the whole chain back to
+// pending_dean, undoing QA/VPAA/Admin's downstream actions too (their old
+// action timestamps are cleared so they see a clean slate once the Dean
+// re-confirms). Blocked once a schedule has actually been generated from
+// this data ('scheduled') — an admin would need to clear that schedule
+// first, since real room/time assignments would otherwise be left
+// pointing at data that's no longer dean-approved.
+router.patch('/:id/dean-revert', authenticate, authorize('dean'), async (req, res) => {
+  try {
+    const [[dean]] = await pool.query('SELECT department FROM users WHERE id = ?', [req.user.id])
+    const [[sub]] = await pool.query(
+      `SELECT s.status, u.department AS chair_dept FROM submissions s
+       JOIN users u ON s.chair_id = u.id WHERE s.id = ?`,
+      [req.params.id]
+    )
+    if (!sub) return res.status(404).json({ message: 'Submission not found.' })
+    if (dean?.department && sub.chair_dept !== dean.department) {
+      return res.status(403).json({ message: 'Access denied.' })
+    }
+    if (sub.status === 'scheduled') {
+      return res.status(409).json({ message: 'A schedule has already been generated from this submission — an admin must clear it before you can revert.' })
+    }
+    const REVERTIBLE = new Set(['pending_qa', 'pending_vpaa', 'pending_admin', 'validated'])
+    if (!REVERTIBLE.has(sub.status)) {
+      return res.status(409).json({ message: `Cannot revert a submission that is currently ${sub.status.replace(/_/g, ' ')}.` })
+    }
+    await pool.query(
+      `UPDATE submissions SET status = 'pending_dean',
+         dean_action_at = NULL, qa_action_at = NULL, vpaa_action_at = NULL, admin_action_at = NULL
+       WHERE id = ?`,
+      [req.params.id]
+    )
+    res.json({ message: 'Submission reverted to Pending Dean Review. QA, VPAA, and Admin will need to review it again.' })
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.', error: err.message })
+  }
+})
+
 // Quality Assurance: all submissions at or past the QA stage (unscoped — university-wide)
 router.get('/qa', authenticate, authorize('quality_assurance'), async (req, res) => {
   try {

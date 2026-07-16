@@ -52,6 +52,7 @@ export const submissionsAPI = {
   // Dean
   getForDean:            ()             => api.get('/submissions/dean'),
   deanAction:            (id, action)   => api.patch(`/submissions/${id}/dean`, { action }),
+  deanRevert:            (id)           => api.patch(`/submissions/${id}/dean-revert`),
   // Quality Assurance
   getForQA:              ()             => api.get('/submissions/qa'),
   qaAction:              (id, action)   => api.patch(`/submissions/${id}/qa`, { action }),
