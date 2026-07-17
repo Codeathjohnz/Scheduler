@@ -16,17 +16,6 @@ const ROLE_PATHS = {
   [ROLES.STUDENT]:           '/student',
 }
 
-const QUICK_LOGINS = [
-  { label: 'Admin',        username: 'admin',      password: 'admin123' },
-  { label: 'Program Chair',username: 'chair',      password: 'chair123' },
-  { label: 'Dean',         username: 'dean',       password: 'dean123'  },
-  { label: 'Chief CPD',    username: 'chiefcpd',   password: 'chiefcpd123' },
-  { label: 'Quality Assurance', username: 'qa',    password: 'qa123'    },
-  { label: 'VPAA',         username: 'vpaa',       password: 'vpaa123'  },
-  { label: 'Instructor',   username: 'instructor', password: 'instr123' },
-  { label: 'Student',      username: 'student',    password: 'stud123'  },
-]
-
 export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
@@ -121,23 +110,6 @@ export default function LoginPage() {
                 {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Signing in...</> : 'Sign In'}
               </button>
             </form>
-
-            {/* Quick demo logins */}
-            <div className="mt-5 border-t border-gray-100 pt-4">
-              <p className="text-xs text-gray-400 font-medium mb-2 uppercase tracking-wide">Quick Demo Login</p>
-              <div className="flex flex-wrap gap-2">
-                {QUICK_LOGINS.map(q => (
-                  <button
-                    key={q.username}
-                    type="button"
-                    onClick={() => setForm({ username: q.username, password: q.password })}
-                    className="text-xs bg-gray-100 hover:bg-amber-50 hover:border-amber-300 border border-gray-200 text-gray-600 hover:text-green-800 px-3 py-1.5 rounded-lg transition font-medium"
-                  >
-                    {q.label}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
 
