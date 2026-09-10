@@ -2,6 +2,7 @@ import { Router } from 'express'
 import mammoth from 'mammoth'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
+import { parseProspectusPdf } from '../utils/parseProspectusPdf.js'
 
 const router = Router()
 
@@ -95,6 +96,30 @@ router.post('/parse-docx', authenticate, authorize('chair', 'admin'), async (req
   }
 })
 
+// POST /api/prospectus/parse-pdf — body: { data: base64 } — OCR-based parser
+// for the OLD prospectus format some departments only have as a scanned PDF
+// (no selectable text layer at all, confirmed against real samples — this is
+// real OCR, not text extraction). Deliberately much less trustworthy than
+// parse-docx/the Excel path: titles, course codes, and prerequisites OCR
+// well, but Lec/Lab/Units digits do not (measured ~50-60% accuracy even
+// after isolating each cell) — every row comes back with a `needsReview`
+// flag where the parser itself couldn't read it at all, but a false "clean"
+// row is NOT a guarantee the numbers are right. The client must show an
+// editable preview for this path, not the read-only one used for xlsx/docx.
+router.post('/parse-pdf', authenticate, authorize('chair', 'admin'), async (req, res) => {
+  const { data } = req.body
+  if (!data) {
+    return res.status(400).json({ message: 'No file data provided.' })
+  }
+  try {
+    const buffer = Buffer.from(data, 'base64')
+    const subjects = await parseProspectusPdf(buffer)
+    res.json({ subjects })
+  } catch (err) {
+    res.status(400).json({ message: err.message || 'Failed to read the PDF.' })
+  }
+})
+
 // GET /api/prospectus  — list uploaded prospectuses (chair sees only their own)
 router.get('/', authenticate, async (req, res) => {
   const isChair = req.user.role === 'chair'
@@ -160,6 +185,38 @@ async function pooledSubjects(matches, semester) {
   })
 }
 
+// Union of subjects across every CHAIR's latest prospectus within one
+// department, GE/PATHFIT/NSTP rows excluded — not just the single most
+// recently uploaded prospectus department-wide. A department can have
+// several chairs each owning a different program (e.g. CCIS has a BSIT
+// chair and a BSIS chair); picking only the newest upload would make the
+// other chair's program invisible to that department's instructors as soon
+// as anyone else in the department uploaded more recently. Rows are not
+// deduped by course code — unlike the GE/PATHFIT/NSTP pools, each program's
+// copy of a subject is its own prospectus_subjects row (and instructor
+// specialties are selected per row), so a subject two programs happen to
+// share still needs to appear once per program.
+async function departmentSubjects(department, semester) {
+  const params = [department, department]
+  let semFilter = ''
+  if (semester) { semFilter = 'AND ps.semester = ?'; params.push(semester) }
+  const [rows] = await pool.query(`
+    SELECT ps.*
+    FROM prospectus_subjects ps
+    JOIN prospectus p ON ps.prospectus_id = p.id
+    JOIN users u ON p.uploaded_by = u.id
+    JOIN (
+      SELECT p2.uploaded_by, MAX(p2.created_at) AS max_created
+      FROM prospectus p2 JOIN users u2 ON p2.uploaded_by = u2.id
+      WHERE u2.department = ?
+      GROUP BY p2.uploaded_by
+    ) latest ON latest.uploaded_by = p.uploaded_by AND latest.max_created = p.created_at
+    WHERE u.department = ? ${semFilter}
+    ORDER BY ps.year_level, ps.semester, ps.id
+  `, params)
+  return rows.filter(s => !isGeneralEd(s.course_code) && !isPathfit(s.course_code) && !isNstp(s.course_code))
+}
+
 // GET /api/prospectus/latest/subjects?semester=1  — subjects from the most
 // recent prospectus for the caller's own department (a Chair's own uploads,
 // unfiltered — they need to see everything, GE/PATHFIT/NSTP included, to
@@ -167,7 +224,8 @@ async function pooledSubjects(matches, semester) {
 // instructor gets the union of GE rows across every department's latest
 // prospectus; a PATHFIT instructor gets the union of PATHFIT rows the same
 // way; an NSTP instructor gets the union of NSTP rows the same way; every
-// other department instructor gets their own department's latest prospectus
+// other department instructor gets the union of every chair's latest
+// prospectus within their own department (see departmentSubjects above),
 // with all three pools excluded.
 router.get('/latest/subjects', authenticate, async (req, res) => {
   const isChair = req.user.role === 'chair'
@@ -202,24 +260,7 @@ router.get('/latest/subjects', authenticate, async (req, res) => {
       return res.json(await pooledSubjects(isNstp, semester))
     }
 
-    const [[latest]] = await pool.query(
-      `SELECT p.id FROM prospectus p
-       JOIN users u ON p.uploaded_by = u.id
-       WHERE u.department = ?
-       ORDER BY p.created_at DESC LIMIT 1`,
-      [req.user.department]
-    )
-    if (!latest) return res.json([])
-
-    const params = [latest.id]
-    let semFilter = ''
-    if (semester) { semFilter = 'AND semester = ?'; params.push(semester) }
-
-    const [rows] = await pool.query(
-      `SELECT * FROM prospectus_subjects WHERE prospectus_id = ? ${semFilter} ORDER BY year_level, semester, id`,
-      params
-    )
-    res.json(rows.filter(s => !isGeneralEd(s.course_code) && !isPathfit(s.course_code) && !isNstp(s.course_code)))
+    res.json(await departmentSubjects(req.user.department, semester))
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
   }
@@ -362,22 +403,7 @@ router.get('/specialties/peers', authenticate, authorize('instructor', 'chair', 
     } else if (req.user.department === 'NSTP') {
       mySubjects = await pooledSubjects(isNstp, semester)
     } else {
-      const [[latest]] = await pool.query(
-        `SELECT p.id FROM prospectus p
-         JOIN users u ON p.uploaded_by = u.id
-         WHERE u.department = ?
-         ORDER BY p.created_at DESC LIMIT 1`,
-        [req.user.department]
-      )
-      if (!latest) return res.json({})
-      const params = [latest.id]
-      let semFilter = ''
-      if (semester) { semFilter = 'AND semester = ?'; params.push(semester) }
-      const [rows] = await pool.query(
-        `SELECT * FROM prospectus_subjects WHERE prospectus_id = ? ${semFilter} ORDER BY year_level, semester, id`,
-        params
-      )
-      mySubjects = rows.filter(s => !isGeneralEd(s.course_code) && !isPathfit(s.course_code) && !isNstp(s.course_code))
+      mySubjects = await departmentSubjects(req.user.department, semester)
     }
     if (!mySubjects.length) return res.json({})
 

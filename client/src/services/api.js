@@ -66,6 +66,7 @@ export const roomsAPI = {
   getAll:          ()     => api.get('/rooms'),
   getAvailability: ()     => api.get('/rooms/availability'),
   create:          (data) => api.post('/rooms', data),
+  update:          (id, data) => api.put(`/rooms/${id}`, data),
   remove:          (id)   => api.delete(`/rooms/${id}`),
   bulkCreate:      (rooms) => api.post('/rooms/bulk', { rooms }),
 }
@@ -106,6 +107,7 @@ export const facultyLoadAPI = {
   autoGenerate:     (data)                  => api.post('/faculty-load/auto-generate', data),
   getSectionCounts: (year, sem)             => api.get(`/faculty-load/section-counts?year=${year}&semester=${sem}`),
   setSectionCounts: (academic_year, semester, counts) => api.put('/faculty-load/section-counts', { academic_year, semester, counts }),
+  getMyLoad:        (year, sem)             => api.get(`/faculty-load/my-load?year=${year}&semester=${sem}`),
   exportDocx:       (year, sem, collegeName, programName) => api.get(
     `/faculty-load/export-docx?year=${year}&semester=${sem}&collegeName=${encodeURIComponent(collegeName)}&programName=${encodeURIComponent(programName)}`,
     { responseType: 'blob' }
@@ -128,6 +130,7 @@ export const prospectusAPI = {
   getAll:           ()        => api.get('/prospectus'),
   import:           (data)    => api.post('/prospectus', data),
   parseDocx:        (data)    => api.post('/prospectus/parse-docx', data),
+  parsePdf:         (data)    => api.post('/prospectus/parse-pdf', data),
   remove:           (id)      => api.delete(`/prospectus/${id}`),
   getSubjects:      (id)      => api.get(`/prospectus/${id}/subjects`),
   getLatestSubjects:(semester) => api.get(`/prospectus/latest/subjects${semester ? `?semester=${semester}` : ''}`),

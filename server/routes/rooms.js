@@ -13,12 +13,21 @@ router.get('/', authenticate, async (req, res) => {
   }
 })
 
+// Comma-separated list of programs/departments allowed to use a room (e.g.
+// "CCIS,BSIT,BSIS") — trimmed and re-joined so it stores consistently;
+// null/empty means open to everyone (unchanged default behavior).
+function cleanProgramRestriction(val) {
+  if (!val) return null
+  const list = String(val).split(',').map(s => s.trim()).filter(Boolean)
+  return list.length ? list.join(',') : null
+}
+
 router.post('/', authenticate, authorize('admin'), async (req, res) => {
-  const { building, room_number, capacity, room_type, floor_level, is_accessible } = req.body
+  const { building, room_number, capacity, room_type, floor_level, is_accessible, program_restriction } = req.body
   try {
     const [result] = await pool.query(
-      'INSERT INTO rooms (building, room_number, capacity, room_type, floor_level, is_accessible) VALUES (?,?,?,?,?,?)',
-      [building, room_number, capacity, room_type, floor_level, is_accessible ? 1 : 0]
+      'INSERT INTO rooms (building, room_number, capacity, room_type, floor_level, is_accessible, program_restriction) VALUES (?,?,?,?,?,?,?)',
+      [building, room_number, capacity, room_type, floor_level, is_accessible ? 1 : 0, cleanProgramRestriction(program_restriction)]
     )
     res.status(201).json({ id: result.insertId })
   } catch (err) {
@@ -26,7 +35,25 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
   }
 })
 
-const VALID_ROOM_TYPES = new Set(['Lecture', 'Laboratory', 'Special'])
+// PUT /api/rooms/:id — edit an existing room (previously create/delete only)
+router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
+  const { building, room_number, capacity, room_type, floor_level, is_accessible, program_restriction } = req.body
+  try {
+    const [result] = await pool.query(
+      `UPDATE rooms SET building=?, room_number=?, capacity=?, room_type=?, floor_level=?, is_accessible=?, program_restriction=?
+       WHERE id=?`,
+      [building, room_number, capacity, room_type, floor_level, is_accessible ? 1 : 0, cleanProgramRestriction(program_restriction), req.params.id]
+    )
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Room not found.' })
+    }
+    res.json({ message: 'Room updated.' })
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.', error: err.message })
+  }
+})
+
+const VALID_ROOM_TYPES = new Set(['Lecture', 'Laboratory', 'Special', 'Gym'])
 
 // POST /api/rooms/bulk — spreadsheet import. body: { rooms: [{ building, room_number, capacity, room_type, floor_level, is_accessible }] }
 // Re-importing the same building/room_number updates that row instead of failing (unique key: building + room_number).

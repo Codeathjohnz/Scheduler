@@ -212,9 +212,10 @@ CREATE TABLE IF NOT EXISTS `rooms` (
   `building` varchar(50) NOT NULL,
   `room_number` varchar(20) NOT NULL,
   `capacity` int(11) NOT NULL DEFAULT 40,
-  `room_type` enum('Lecture','Laboratory','Special') NOT NULL DEFAULT 'Lecture',
+  `room_type` enum('Lecture','Laboratory','Special','Gym') NOT NULL DEFAULT 'Lecture',
   `floor_level` tinyint(4) NOT NULL DEFAULT 1,
   `is_accessible` tinyint(1) DEFAULT 0,
+  `program_restriction` varchar(255) DEFAULT NULL COMMENT 'Comma-separated list of programs/departments allowed to use this room, e.g. "CCIS,BSIT,BSIS". NULL/empty = open to everyone.',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_room` (`building`,`room_number`)
 ) ENGINE=InnoDB AUTO_INCREMENT=27 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

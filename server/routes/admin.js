@@ -43,6 +43,7 @@ router.get('/stats', authenticate, authorize('admin'), async (req, res) => {
     const [scheduleRows] = await pool.query(`
       SELECT gs.*,
         COALESCE(CONCAT(r.building,' ',r.room_number), 'Online Class') AS room_name,
+        r.room_type,
         fle.course_code, fle.program_yr_sec,
         u.name AS instructor_name, u.id AS instructor_id
       FROM generated_schedules gs

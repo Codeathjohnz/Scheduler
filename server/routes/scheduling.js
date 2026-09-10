@@ -55,10 +55,12 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
     const validatedChairIds = validatedSubs.map(s => s.chair_id)
 
     const [entries] = await pool.query(`
-      SELECT fle.*, u.name AS instructor_name, chair.department AS dept
+      SELECT fle.*, u.name AS instructor_name, chair.department AS dept, p.program AS program
       FROM faculty_load_entries fle
       LEFT JOIN users u ON fle.assigned_instructor_id = u.id
       LEFT JOIN users chair ON fle.chair_id = chair.id
+      LEFT JOIN prospectus_subjects ps ON fle.subject_id = ps.id
+      LEFT JOIN prospectus p ON ps.prospectus_id = p.id
       WHERE fle.academic_year = ? AND fle.semester = ?
         AND fle.chair_id IN (?)
       ORDER BY fle.lab_hours DESC, fle.lec_hours DESC, fle.id

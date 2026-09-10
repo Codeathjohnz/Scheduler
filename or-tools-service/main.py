@@ -35,6 +35,10 @@ UNSCHEDULED_PENALTY = 5000  # heavily discourages leaving a session unscheduled
 class Option(BaseModel):
     isOnline: bool = False
     roomId: Optional[int] = None
+    # Gym rooms are shared — any number of PATHFIT sections can run in one at
+    # the same time, so an option in a shared room must never be grouped into
+    # that room's NoOverlap constraint (same treatment as isOnline below).
+    isSharedRoom: bool = False
     days: list[str]
     durationMin: int
     baseScore: float = 0.0
@@ -94,7 +98,7 @@ def solve(req: SolveRequest):
             starts[(i, k)] = s
             presence_terms.append(p)
 
-            if not opt.isOnline and opt.roomId is not None:
+            if not opt.isOnline and not opt.isSharedRoom and opt.roomId is not None:
                 for day in opt.days:
                     room_day_groups.setdefault((opt.roomId, day), []).append(iv)
 

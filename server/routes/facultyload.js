@@ -68,16 +68,22 @@ async function getOtherLoadMap(academic_year, semester) {
   return map
 }
 
+// NSTP does not count toward an instructor's unit-credit load (it's carried
+// on the record and still shown on the Faculty Loading Sheet, but excluded
+// from the 21/27 cap and every "load" total) — same NSTP/PATHFIT/GE prefix
+// convention used everywhere else in this file.
 export async function getCombinedLoadMap(academic_year, semester) {
   const [teachRows] = await pool.query(
-    `SELECT assigned_instructor_id AS instructor_id, SUM(lec_hours + lab_hours * 0.75) AS total_credit
+    `SELECT assigned_instructor_id AS instructor_id, lec_hours, lab_hours, course_code
      FROM faculty_load_entries
-     WHERE academic_year=? AND semester=? AND assigned_instructor_id IS NOT NULL
-     GROUP BY assigned_instructor_id`,
+     WHERE academic_year=? AND semester=? AND assigned_instructor_id IS NOT NULL`,
     [academic_year, semester]
   )
   const map = {}
-  teachRows.forEach(r => { map[r.instructor_id] = Number(r.total_credit) })
+  for (const r of teachRows) {
+    if (isNstp(r.course_code)) continue
+    map[r.instructor_id] = (map[r.instructor_id] || 0) + unitCredit(r.lec_hours, r.lab_hours)
+  }
   const otherMap = await getOtherLoadMap(academic_year, semester)
   for (const [id, units] of Object.entries(otherMap)) {
     map[id] = (map[id] || 0) + units
@@ -150,6 +156,38 @@ router.get('/', authenticate, authorize('chair', 'admin'), async (req, res) => {
       WHERE fal.academic_year = ? AND fal.semester = ?
         ${isChair ? 'AND fal.chair_id = ?' : ''}
     `, adminParams)
+
+    res.json({ entries, adminLoads })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+// GET /api/faculty-load/my-load?year=&semester=  — the calling instructor's
+// own Individual Faculty Load (IFL): every subject assigned to them across
+// EVERY chair they teach for (not just one department/program — a CCIS
+// instructor teaching both a BSIT and a BSIS subject sees both here), plus
+// their own administrative/research/extension/project load. Open to any role
+// that can be assigned teaching load (instructor, and chairs/deans who also
+// teach, matching the specialties/confirm-load routes' authorize list).
+router.get('/my-load', authenticate, authorize('instructor', 'chair', 'dean'), async (req, res) => {
+  const { year = '2026-2027', semester = 1 } = req.query
+  try {
+    const [entries] = await pool.query(`
+      SELECT fle.*,
+        chair.name AS chair_name, chair.department AS chair_dept,
+        ps.prerequisite
+      FROM faculty_load_entries fle
+      LEFT JOIN users chair ON fle.chair_id = chair.id
+      LEFT JOIN prospectus_subjects ps ON fle.subject_id = ps.id
+      WHERE fle.academic_year = ? AND fle.semester = ? AND fle.assigned_instructor_id = ?
+      ORDER BY fle.sort_order, fle.id
+    `, [year, semester, req.user.id])
+
+    const [adminLoads] = await pool.query(`
+      SELECT fal.* FROM faculty_admin_loads fal
+      WHERE fal.academic_year = ? AND fal.semester = ? AND fal.instructor_id = ?
+    `, [year, semester, req.user.id])
 
     res.json({ entries, adminLoads })
   } catch (err) {
@@ -530,13 +568,15 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
       }
 
       const subjectCredit = unitCredit(sub.lec_hours, sub.lab_hours)
+      const isNstpSubject = isNstp(sub.course_code)
       const eligiblePool = isGeneralEd(sub.course_code) ? geInstructorIds
         : isPathfit(sub.course_code) ? pathfitInstructorIds
-        : isNstp(sub.course_code) ? nstpInstructorIds
+        : isNstpSubject ? nstpInstructorIds
         : majorInstructorIds
       const specialists = (specialtyMap[sub.id] || []).filter(id => eligiblePool.includes(id))
       const assignedId = pickInstructor(specialists, subjectCredit)
-      if (assignedId) loadMap[assignedId] = (loadMap[assignedId] || 0) + subjectCredit
+      // NSTP does not count toward the unit-credit cap — see getCombinedLoadMap.
+      if (assignedId && !isNstpSubject) loadMap[assignedId] = (loadMap[assignedId] || 0) + subjectCredit
 
       if (existing) {
         if (assignedId) toFill.push([assignedId, existing.id])
