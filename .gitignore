@@ -8,6 +8,7 @@ __pycache__/
 .env.local
 .env.*.local
 server/.env
+"user credentials.txt"
 
 # Build output (regenerated via `npm run build`)
 client/dist

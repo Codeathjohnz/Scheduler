@@ -19,6 +19,13 @@ function unitCredit(lec, lab) {
   return Number(lec || 0) + Number(lab || 0) * 0.75
 }
 
+// NSTP does not count toward an instructor's unit-credit load (same NSTP
+// prefix convention as facultyload.js/scheduler.js) — the course still lists
+// on the sheet, it's just excluded from every total below it.
+function isNstp(courseCode) {
+  return /^NSTP\b/i.test(String(courseCode || '').trim())
+}
+
 function round2(n) {
   return Math.round(n * 100) / 100
 }
@@ -265,11 +272,15 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
 
     const sum = (list, key) => list.reduce((acc, r) => acc + Number(r[key] || 0), 0)
 
-    const totalUnits        = sum(inst.courses, 'units')
-    const totalLec           = sum(inst.courses, 'lec')
-    const totalLab           = sum(inst.courses, 'lab')
-    const totalUnitCredit    = round2(sum(inst.courses, 'unitCredit'))
-    const totalContactHours  = sum(inst.courses, 'contactHours')
+    // NSTP rows still print on the sheet (the full inst.courses list used
+    // below for the `courses:` field is untouched) — loadCourses is only
+    // for these totals, which NSTP must not count toward.
+    const loadCourses = inst.courses.filter(c => !isNstp(c.courseNo))
+    const totalUnits        = sum(loadCourses, 'units')
+    const totalLec           = sum(loadCourses, 'lec')
+    const totalLab           = sum(loadCourses, 'lab')
+    const totalUnitCredit    = round2(sum(loadCourses, 'unitCredit'))
+    const totalContactHours  = sum(loadCourses, 'contactHours')
 
     const hasAdmin = inst.adminLoads.length > 0
     const totalAdminUnits       = sum(inst.adminLoads, 'units')

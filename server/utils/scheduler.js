@@ -161,8 +161,28 @@ function buildingAccess(building, program, buildingPriorities) {
   return { allowed: false, rank: null }
 }
 
-function filterRoomsByProgram(rooms, program, buildingPriorities) {
-  return rooms.filter(r => buildingAccess(r.building, program, buildingPriorities).allowed)
+// A room can additionally be reserved to specific programs/departments via
+// rooms.program_restriction (admin-set on Manage Rooms), e.g. "CCIS,BSIT" —
+// finer-grained than the building-level buildingPriorities above (which
+// only knows the session's chair.department, not its specific curriculum
+// program). Empty/null restriction = open to everyone, unchanged from
+// before this existed. Matches against EITHER the session's department
+// (e.g. "CCIS") or its specific program (e.g. "BSIT"), so an admin can
+// reserve a room by department, by program, or by a mix of both.
+function roomAllowsProgram(room, department, program) {
+  const raw = room.program_restriction
+  if (!raw) return true
+  const allowed = raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+  if (!allowed.length) return true
+  const dept = (department || '').trim().toUpperCase()
+  const prog = (program || '').trim().toUpperCase()
+  return (!!dept && allowed.includes(dept)) || (!!prog && allowed.includes(prog))
+}
+
+function filterRoomsByProgram(rooms, department, program, buildingPriorities) {
+  return rooms
+    .filter(r => buildingAccess(r.building, department, buildingPriorities).allowed)
+    .filter(r => roomAllowsProgram(r, department, program))
 }
 
 // ── accessibility room filter ─────────────────────────────────────────────────
@@ -249,6 +269,14 @@ function isPhysicalActivity(courseCode) {
   return /^(NSTP|PATHFIT)\s*\d/i.test(String(courseCode || '').trim())
 }
 
+// PATHFIT meets in the gym, not a classroom — and the gym is shared: any
+// number of PATHFIT sections can run in it at the same time (see the 'Gym'
+// room-conflict exemptions below), so PATHFIT is never room-scarce the way a
+// lecture room is.
+function isPathfit(courseCode) {
+  return /^PATHFIT\b/i.test(String(courseCode || '').trim())
+}
+
 // Virtual "room" for online classes — id: null means it never triggers the
 // room-conflict check below, so unlimited sessions can be "in" it at once.
 const ONLINE_ROOM = { id: null, building: 'Online', room_number: 'Class', room_type: null, floor_level: 1, is_accessible: 1 }
@@ -296,7 +324,9 @@ function tryOnlineFallback(session, scheduled) {
 // ── session builder (shared by both the greedy and genetic engines) ──────────
 
 /**
- * @param {object[]} entries            - faculty_load_entries rows (with `dept` = chair's department)
+ * @param {object[]} entries            - faculty_load_entries rows (with `dept` = chair's department,
+ *   and optionally `program` = the subject's own prospectus program, e.g. "BSIT" — used for
+ *   rooms.program_restriction, finer-grained than `dept`)
  * @param {object[]} rooms              - rooms rows from DB
  * @param {object}   mobilityMap        - { instructor_id: mobility_level }
  * @param {object}   buildingPriorities - { [building]: { [program]: rank } }
@@ -324,7 +354,13 @@ export function buildSessions(entries, rooms, mobilityMap, buildingPriorities) {
   for (const entry of entries) {
     const mobility = mobilityMap[entry.assigned_instructor_id] || 3
     const department = entry.dept || null
+    // The subject's specific curriculum program (e.g. "BSIT"), from the
+    // prospectus it was imported from — finer-grained than `department`
+    // (the chair's department, e.g. "CCIS"), used for room.program_restriction.
+    const program = entry.program || null
     for (const g of buildPatterns(entry.lec_hours, entry.lab_hours)) {
+      // PATHFIT meets in the gym, not a regular lecture room.
+      const roomType = isPathfit(entry.course_code) ? 'Gym' : g.roomType
       sessions.push({
         entryId:        entry.id,
         instructorId:   entry.assigned_instructor_id || null,
@@ -333,11 +369,12 @@ export function buildSessions(entries, rooms, mobilityMap, buildingPriorities) {
         courseCode:     entry.course_code,
         title:          entry.descriptive_title,
         sessionType:    g.sessionType,
-        roomType:       g.roomType,
+        roomType,
         patterns:       g.patterns,
         mobilityLevel:  mobility,
         department,
-        deptRank:       bestDeptRank(department, g.roomType),
+        program,
+        deptRank:       bestDeptRank(department, roomType),
       })
     }
   }
@@ -373,7 +410,7 @@ export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPrior
 
   for (const session of sessions) {
     const compatRooms = rooms.filter(r => r.room_type === session.roomType)
-    const authorizedRooms = filterRoomsByProgram(compatRooms, session.department, buildingPriorities)
+    const authorizedRooms = filterRoomsByProgram(compatRooms, session.department, session.program, buildingPriorities)
     const candidateRooms = filterRoomsByMobility(authorizedRooms, session.mobilityLevel)
 
     // For Level 2: sort rooms by floor preference before scanning
@@ -396,8 +433,9 @@ export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPrior
         if (startMin >= 720 && startMin < 780)      continue  // starts during lunch
 
         for (const room of orderedRooms) {
-          // ① Room conflict
-          if (scheduled.some(s =>
+          // ① Room conflict — Gym rooms are exempt: the gym is shared, any
+          // number of PATHFIT sections can run in it at the same time.
+          if (room.room_type !== 'Gym' && scheduled.some(s =>
             s.roomId === room.id &&
             (s.daysMask & mask) &&
             timeOverlap(s.startMin, s.durationMin, startMin, pattern.durationMin)
@@ -528,7 +566,7 @@ export function precomputeSessionCandidates(sessions, rooms, buildingPriorities)
 
   return sessions.map(session => {
     const compatRooms     = rooms.filter(r => r.room_type === session.roomType)
-    const authorizedRooms = filterRoomsByProgram(compatRooms, session.department, buildingPriorities)
+    const authorizedRooms = filterRoomsByProgram(compatRooms, session.department, session.program, buildingPriorities)
     const candidateRooms  = filterRoomsByMobility(authorizedRooms, session.mobilityLevel)
     const canGoOnline      = session.sessionType === 'lecture' && !isPhysicalActivity(session.courseCode)
     return {
@@ -613,7 +651,8 @@ function evaluateFitness(genes, candidates, buildingPriorities) {
       const b = placements[j]
       if (!(a.daysMask & b.daysMask)) continue
       if (!timeOverlap(a.startMin, a.durationMin, b.startMin, b.durationMin)) continue
-      if (a.roomId != null && a.roomId === b.roomId) hardPenalty += HARD_CONFLICT_PENALTY
+      // Gym rooms are exempt from the room-conflict penalty — shared, like the greedy engine.
+      if (a.roomId != null && a.roomId === b.roomId && a.room.room_type !== 'Gym') hardPenalty += HARD_CONFLICT_PENALTY
       if (a.session.instructorId && a.session.instructorId === b.session.instructorId) hardPenalty += HARD_CONFLICT_PENALTY
       if (a.session.programYrSec && a.session.programYrSec === b.session.programYrSec) hardPenalty += HARD_CONFLICT_PENALTY
     }
@@ -865,6 +904,9 @@ export async function generateScheduleORTools(entries, rooms, mobilityMap = {}, 
           opts.push({
             isOnline: false,
             roomId: room.id,
+            // Gym rooms are shared — any number of PATHFIT sections can run
+            // in one at the same time, so the solver must not NoOverlap them.
+            isSharedRoom: room.room_type === 'Gym',
             days: pattern.days,
             durationMin: pattern.durationMin,
             baseScore: computeStaticScore(session, room, buildingPriorities),
@@ -1025,7 +1067,8 @@ export function detectConflicts(rows) {
       const bStart = timeToMin(b.start_time); const bEnd = timeToMin(b.end_time)
       if (!timeOverlap(aStart, aEnd - aStart, bStart, bEnd - bStart)) continue
 
-      if (a.room_id && a.room_id === b.room_id) {
+      // Gym rooms are shared — multiple PATHFIT sections at the same time is expected, not a conflict.
+      if (a.room_id && a.room_id === b.room_id && a.room_type !== 'Gym') {
         conflicts.push({
           type: 'room', ids: [a.id, b.id],
           message: `Room conflict: ${a.room_name} used by "${a.course_code}" and "${b.course_code}" at the same time`,
