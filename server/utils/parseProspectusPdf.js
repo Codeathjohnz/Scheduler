@@ -39,6 +39,17 @@
 import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { PNG } from 'pngjs'
 import { createWorker } from 'tesseract.js'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+// tesseract.js's WASM core already loads from node_modules locally in Node
+// (its Node getCore.js always `require()`s tesseract.js-core — corePath is
+// browser-only), but the English language data defaults to a CDN fetch
+// (jsdelivr) unless told otherwise. Point it at the traineddata file
+// already checked into this repo so OCR works with no outbound network
+// call and no CDN as a production dependency.
+const LANG_PATH = path.join(__dirname, '..')
 
 const YEAR_WORDS = { FIRST: 1, SECOND: 2, THIRD: 3, FOURTH: 4 }
 const SEM_WORDS = { FIRST: 1, SECOND: 2, THIRD: 3, SUMMER: 3 }
@@ -272,7 +283,7 @@ export async function parseProspectusPdf(buffer) {
   const doc = await getDocument({ data: new Uint8Array(buffer) }).promise
   const state = { yearLevel: 1, semester: 1 }
   const allSubjects = []
-  const worker = await createWorker('eng')
+  const worker = await createWorker('eng', 1, { langPath: LANG_PATH, gzip: false })
   try {
     for (let p = 1; p <= doc.numPages; p++) {
       const page = await doc.getPage(p)
