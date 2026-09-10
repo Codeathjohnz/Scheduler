@@ -4,7 +4,8 @@ const api = axios.create({ baseURL: '/api' })
 
 api.interceptors.request.use(config => {
   try {
-    const stored = localStorage.getItem('adssu_user')
+    // "Remember me" on login decides which of these holds the session — see AuthContext.jsx
+    const stored = localStorage.getItem('adssu_user') || sessionStorage.getItem('adssu_user')
     if (stored) {
       const user = JSON.parse(stored)
       if (user.token) config.headers.Authorization = `Bearer ${user.token}`

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState } from 'react'
 
 const AuthContext = createContext(null)
+const STORAGE_KEY = 'adssu_user'
 
 export const ROLES = {
   CHAIR:             'chair',
@@ -13,24 +14,40 @@ export const ROLES = {
   STUDENT:           'student',
 }
 
-export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    try {
-      const stored = localStorage.getItem('adssu_user')
-      return stored ? JSON.parse(stored) : null
-    } catch {
-      return null
-    }
-  })
+// "Remember me" on the login form decides WHERE the session lives:
+// localStorage survives closing the browser, sessionStorage clears when the
+// tab/browser closes. Checked on load (localStorage first, since that's the
+// one meant to persist) so a returning user stays logged in either way.
+function readStoredUser() {
+  try {
+    const fromLocal = localStorage.getItem(STORAGE_KEY)
+    if (fromLocal) return JSON.parse(fromLocal)
+    const fromSession = sessionStorage.getItem(STORAGE_KEY)
+    return fromSession ? JSON.parse(fromSession) : null
+  } catch {
+    return null
+  }
+}
 
-  const login = (userData) => {
+export function AuthProvider({ children }) {
+  const [user, setUser] = useState(readStoredUser)
+
+  const login = (userData, remember = true) => {
     setUser(userData)
-    localStorage.setItem('adssu_user', JSON.stringify(userData))
+    const serialized = JSON.stringify(userData)
+    if (remember) {
+      localStorage.setItem(STORAGE_KEY, serialized)
+      sessionStorage.removeItem(STORAGE_KEY)
+    } else {
+      sessionStorage.setItem(STORAGE_KEY, serialized)
+      localStorage.removeItem(STORAGE_KEY)
+    }
   }
 
   const logout = () => {
     setUser(null)
-    localStorage.removeItem('adssu_user')
+    localStorage.removeItem(STORAGE_KEY)
+    sessionStorage.removeItem(STORAGE_KEY)
   }
 
   return (
