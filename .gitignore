@@ -10,6 +10,10 @@ __pycache__/
 server/.env
 "user credentials.txt"
 
+# Original full-resolution logo source — optimized copies live in
+# client/public/ and client/src/assets/ and are what's actually used
+asssu_logo_transparent.png
+
 # Build output (regenerated via `npm run build`)
 client/dist
 client/dist-ssr

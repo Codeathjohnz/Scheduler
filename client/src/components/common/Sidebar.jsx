@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext.jsx'
-import { GraduationCap, LogOut, KeyRound } from 'lucide-react'
+import { LogOut, KeyRound } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ChangePasswordModal from './ChangePasswordModal.jsx'
+import adssuLogo from '../../assets/adssu-logo.png'
 
 export default function Sidebar({ navItems, roleLabel }) {
   const { user, logout } = useAuth()
@@ -22,8 +23,8 @@ export default function Sidebar({ navItems, roleLabel }) {
         {/* Brand */}
         <div className="px-5 py-5 border-b border-green-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-amber-400 rounded-lg flex items-center justify-center shrink-0 shadow">
-              <GraduationCap className="w-6 h-6 text-green-900" />
+            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shrink-0 shadow overflow-hidden">
+              <img src={adssuLogo} alt="ADSSU seal" className="w-[85%] h-[85%] object-contain" />
             </div>
             <div>
               <p className="text-white font-bold text-sm leading-tight">ADSSU</p>
