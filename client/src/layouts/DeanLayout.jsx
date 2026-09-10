@@ -1,10 +1,11 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from '../components/common/Sidebar.jsx'
-import { LayoutDashboard, ClipboardCheck, GraduationCap, Accessibility, CheckSquare, PenTool } from 'lucide-react'
+import { LayoutDashboard, ClipboardCheck, GraduationCap, Accessibility, CheckSquare, PenTool, ClipboardList } from 'lucide-react'
 
 const nav = [
   { to: '/dean', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/dean/review', icon: ClipboardCheck, label: 'Review Submissions' },
+  { to: '/dean/my-load', icon: ClipboardList, label: 'My Faculty Load' },
   { to: '/dean/confirm-load', icon: CheckSquare, label: 'Confirm My Load' },
   { to: '/dean/specialty', icon: GraduationCap, label: 'My Specialty' },
   { to: '/dean/accessibility', icon: Accessibility, label: 'Accessibility Request' },

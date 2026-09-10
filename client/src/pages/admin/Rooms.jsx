@@ -5,10 +5,10 @@ import { roomsAPI, buildingPriorityAPI } from '../../services/api.js'
 import toast from 'react-hot-toast'
 import {
   Plus, Trash2, X, Loader2, DoorOpen, FlaskConical, MonitorPlay, Accessibility,
-  ListOrdered, ArrowUp, ArrowDown, Pencil, Upload, FileSpreadsheet,
+  ListOrdered, ArrowUp, ArrowDown, Pencil, Upload, FileSpreadsheet, Dumbbell, Lock,
 } from 'lucide-react'
 
-const PROGRAM_SUGGESTIONS = ['CCIS', 'General Education', 'CEIT', 'CON', 'CBPA', 'CTE', 'Office of the VPAA', "Registrar's Office"]
+const PROGRAM_SUGGESTIONS = ['CCIS', 'BSIT', 'BSIS', 'General Education', 'CEIT', 'CON', 'CBPA', 'CTE', 'Office of the VPAA', "Registrar's Office"]
 
 /* ─── Spreadsheet import helpers ──────────────────────────────
    Expected columns (case-insensitive, flexible naming):
@@ -48,8 +48,10 @@ function resolveRoomType(typeVal, remarksVal) {
   if (t === 'lecture') return 'Lecture'
   if (t === 'laboratory' || t === 'lab') return 'Laboratory'
   if (t === 'special') return 'Special'
+  if (t === 'gym') return 'Gym'
   const r = String(remarksVal || '').toLowerCase()
   if (r.includes('lab')) return 'Laboratory'
+  if (r.includes('gym')) return 'Gym'
   if (r.includes('lecture')) return 'Lecture'
   return 'Lecture'
 }
@@ -88,11 +90,12 @@ const TYPE_STYLES = {
   Lecture:    { chip: 'bg-blue-100 text-blue-700',   icon: MonitorPlay,  label: 'Lecture' },
   Laboratory: { chip: 'bg-purple-100 text-purple-700', icon: FlaskConical, label: 'Laboratory' },
   Special:    { chip: 'bg-amber-100 text-amber-700',  icon: DoorOpen,     label: 'Special' },
+  Gym:        { chip: 'bg-emerald-100 text-emerald-700', icon: Dumbbell,  label: 'Gym' },
 }
 
 const EMPTY_FORM = {
   building: '', room_number: '', capacity: '',
-  room_type: 'Lecture', floor_level: '1', is_accessible: false,
+  room_type: 'Lecture', floor_level: '1', is_accessible: false, program_restriction: '',
 }
 
 export default function AdminRooms() {
@@ -100,6 +103,7 @@ export default function AdminRooms() {
   const [loading, setLoading]   = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [form, setForm]         = useState(EMPTY_FORM)
+  const [editingId, setEditingId] = useState(null)   // null = Add mode, else editing this room's id
   const [saving, setSaving]     = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [filterType, setFilterType]     = useState('all')
@@ -181,7 +185,20 @@ export default function AdminRooms() {
     }
   }
 
-  const openAdd = () => { setForm(EMPTY_FORM); setShowModal(true) }
+  const openAdd = () => { setForm(EMPTY_FORM); setEditingId(null); setShowModal(true) }
+  const openEdit = (room) => {
+    setForm({
+      building:      room.building,
+      room_number:   room.room_number,
+      capacity:      String(room.capacity),
+      room_type:     room.room_type,
+      floor_level:   String(room.floor_level ?? 1),
+      is_accessible: !!room.is_accessible,
+      program_restriction: room.program_restriction || '',
+    })
+    setEditingId(room.id)
+    setShowModal(true)
+  }
   const closeModal = () => setShowModal(false)
 
   const handleRoomFileChange = (e) => {
@@ -231,19 +248,26 @@ export default function AdminRooms() {
     }
     setSaving(true)
     try {
-      await roomsAPI.create({
+      const payload = {
         building:      form.building.trim(),
         room_number:   form.room_number.trim(),
         capacity:      Number(form.capacity),
         room_type:     form.room_type,
         floor_level:   Number(form.floor_level),
         is_accessible: form.is_accessible ? 1 : 0,
-      })
-      toast.success('Room added.')
+        program_restriction: form.program_restriction.trim() || null,
+      }
+      if (editingId) {
+        await roomsAPI.update(editingId, payload)
+        toast.success('Room updated.')
+      } else {
+        await roomsAPI.create(payload)
+        toast.success('Room added.')
+      }
       closeModal()
       fetchRooms()
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to add room.')
+      toast.error(err.response?.data?.message || `Failed to ${editingId ? 'update' : 'add'} room.`)
     } finally {
       setSaving(false)
     }
@@ -268,6 +292,7 @@ export default function AdminRooms() {
     Lecture:    rooms.filter(r => r.room_type === 'Lecture').length,
     Laboratory: rooms.filter(r => r.room_type === 'Laboratory').length,
     Special:    rooms.filter(r => r.room_type === 'Special').length,
+    Gym:        rooms.filter(r => r.room_type === 'Gym').length,
   }
 
   return (
@@ -291,12 +316,13 @@ export default function AdminRooms() {
       />
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
         {[
           { key: 'all',        label: 'Total Rooms',  value: counts.total,      color: 'bg-gray-50 border-gray-200 text-gray-700' },
           { key: 'Lecture',    label: 'Lecture Rooms', value: counts.Lecture,   color: 'bg-blue-50 border-blue-100 text-blue-700' },
           { key: 'Laboratory', label: 'Laboratories',  value: counts.Laboratory, color: 'bg-purple-50 border-purple-100 text-purple-700' },
           { key: 'Special',    label: 'Special Rooms', value: counts.Special,    color: 'bg-amber-50 border-amber-100 text-amber-700' },
+          { key: 'Gym',        label: 'Gyms',           value: counts.Gym,        color: 'bg-emerald-50 border-emerald-100 text-emerald-700' },
         ].map(s => (
           <button key={s.key} onClick={() => setFilterType(s.key)}
             className={`rounded-xl border p-3 text-left transition ${s.color} ${filterType === s.key ? 'ring-2 ring-green-500' : ''}`}>
@@ -373,6 +399,7 @@ export default function AdminRooms() {
                 <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Floor</th>
                 <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Capacity</th>
                 <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Accessible</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Restricted To</th>
                 <th className="px-5 py-3"></th>
               </tr>
             </thead>
@@ -409,10 +436,25 @@ export default function AdminRooms() {
                       )}
                     </td>
                     <td className="px-5 py-3">
-                      <button onClick={() => setDeleteTarget(r)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {r.program_restriction ? (
+                        <span className="flex items-center gap-1 text-xs font-semibold text-orange-700" title={`Only ${r.program_restriction} may use this room`}>
+                          <Lock className="w-3.5 h-3.5" /> {r.program_restriction}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400">Open to all</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => openEdit(r)}
+                          className="p-1.5 text-gray-400 hover:text-green-700 hover:bg-green-50 rounded-lg transition">
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => setDeleteTarget(r)}
+                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -428,7 +470,7 @@ export default function AdminRooms() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="flex items-center justify-between px-6 py-4 bg-green-800 rounded-t-2xl">
               <div>
-                <p className="text-white font-bold">Add Room</p>
+                <p className="text-white font-bold">{editingId ? 'Edit Room' : 'Add Room'}</p>
                 <p className="text-green-300 text-xs mt-0.5">Fill in the room details</p>
               </div>
               <button onClick={closeModal} className="text-green-300 hover:text-white">
@@ -468,6 +510,7 @@ export default function AdminRooms() {
                     <option value="Lecture">Lecture</option>
                     <option value="Laboratory">Laboratory</option>
                     <option value="Special">Special</option>
+                    <option value="Gym">Gym</option>
                   </select>
                 </div>
                 <div>
@@ -505,10 +548,29 @@ export default function AdminRooms() {
                 </label>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">
+                  Restrict To (optional)
+                </label>
+                <input
+                  list="room-program-list"
+                  value={form.program_restriction}
+                  onChange={e => setForm(f => ({ ...f, program_restriction: e.target.value }))}
+                  placeholder="e.g. CCIS, BSIT, BSIS — blank = open to everyone"
+                  className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-green-500"
+                />
+                <datalist id="room-program-list">
+                  {PROGRAM_SUGGESTIONS.map(p => <option key={p} value={p} />)}
+                </datalist>
+                <p className="text-xs text-gray-400 mt-1">
+                  Comma-separated programs or departments allowed to use this room. Leave blank to keep it open to all.
+                </p>
+              </div>
+
               <div className="flex gap-3 pt-1">
                 <button type="submit" disabled={saving}
                   className="flex-1 flex items-center justify-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-bold py-2.5 rounded-xl transition text-sm">
-                  {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Room'}
+                  {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : editingId ? 'Update Room' : 'Save Room'}
                 </button>
                 <button type="button" onClick={closeModal}
                   className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-xl transition text-sm">

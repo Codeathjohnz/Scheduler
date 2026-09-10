@@ -44,6 +44,10 @@ const CONTACT_HRS_MAX = 40
 
 function unitCredit(lec, lab) { return Number(lec) + Number(lab) * 0.75 }
 function contactHours(lec, lab) { return Number(lec) + Number(lab) }
+// NSTP does not count toward an instructor's unit-credit load (same NSTP
+// prefix convention as the server) — it still lists as an assigned subject,
+// it's just excluded from every load/credit total below.
+function isNstp(code) { return /^NSTP\b/i.test(String(code || '').trim()) }
 
 // Table headers ("Course No.", "Descriptive Title", ...) repeat at the top of every
 // year-level/semester block in the source spreadsheet — recognize and skip them
@@ -148,11 +152,14 @@ function PrintView({ entries, adminLoads, year, semester, onClose }) {
       <div className="p-6 print:p-0">
         {instructors.map((inst, idx) => {
           const subs = inst.subjects
-          const totalUnits   = subs.reduce((a,s) => a + Number(s.units), 0)
-          const totalLec     = subs.reduce((a,s) => a + Number(s.lec_hours), 0)
-          const totalLab     = subs.reduce((a,s) => a + Number(s.lab_hours), 0)
-          const totalCredit  = subs.reduce((a,s) => a + unitCredit(s.lec_hours,s.lab_hours), 0)
-          const totalContact = subs.reduce((a,s) => a + contactHours(s.lec_hours,s.lab_hours), 0)
+          // NSTP subjects still print in the list below; they're just excluded
+          // from these totals (loadSubs).
+          const loadSubs     = subs.filter(s => !isNstp(s.course_code))
+          const totalUnits   = loadSubs.reduce((a,s) => a + Number(s.units), 0)
+          const totalLec     = loadSubs.reduce((a,s) => a + Number(s.lec_hours), 0)
+          const totalLab     = loadSubs.reduce((a,s) => a + Number(s.lab_hours), 0)
+          const totalCredit  = loadSubs.reduce((a,s) => a + unitCredit(s.lec_hours,s.lab_hours), 0)
+          const totalContact = loadSubs.reduce((a,s) => a + contactHours(s.lec_hours,s.lab_hours), 0)
 
           // Non-teaching loads for this instructor — administrative, research,
           // extension, project. These are flat unit credits with no lec/lab hours.
@@ -690,6 +697,122 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
   )
 }
 
+/* ─── OLD-FORMAT (SCANNED PDF) PREVIEW — fully editable, unlike the
+   read-only xlsx/docx preview above. OCR on a scanned prospectus reads
+   titles/codes/prerequisites well but Lec/Lab/Units digits are genuinely
+   unreliable even after isolating each cell (measured against a real
+   sample) — every field here must stay editable, and the numeric columns
+   are visually flagged so a chair doesn't just skim past a wrong number. */
+function PdfPreviewPanel({ preview, programName, setProgramName, academicYear, setAcademicYear, onUpdate, onRemove, onAddRow, onImport, onCancel, importing }) {
+  const reviewCount = preview.subjects.filter(s => s.needsReview).length
+  return (
+    <div className="mb-8 bg-white rounded-2xl shadow-sm border-2 border-amber-400">
+      <div className="flex items-center justify-between px-6 py-4 border-b bg-amber-50 rounded-t-2xl">
+        <div className="flex items-center gap-3">
+          <FileSpreadsheet className="w-5 h-5 text-amber-700" />
+          <div>
+            <p className="font-bold text-amber-900">OCR Preview: {preview.filename}</p>
+            <p className="text-amber-700 text-xs mt-0.5">
+              {preview.subjects.length} rows read
+              {reviewCount > 0 && <span className="font-semibold"> — {reviewCount} flagged for review</span>}
+            </p>
+          </div>
+        </div>
+        <button onClick={onCancel} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+      </div>
+
+      <div className="px-6 py-3 bg-amber-50 border-b border-amber-100 text-xs text-amber-800 flex items-start gap-2">
+        <span className="font-bold shrink-0">⚠ Scanned PDFs are read with OCR, not exact text extraction.</span>
+        <span>Titles and course numbers are usually right; <strong>Lec/Lab/Units numbers are not reliable — check every highlighted number below against your original document before importing.</strong> Fix, delete, or add rows as needed.</span>
+      </div>
+
+      <div className="px-6 py-4 border-b flex flex-wrap gap-4 items-end">
+        {[['Program', programName, setProgramName, 'w-32'], ['Academic Year', academicYear, setAcademicYear, 'w-40']].map(([label, val, set, w]) => (
+          <div key={label}>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+            <input value={val} onChange={e => set(e.target.value)} className={`border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500 ${w}`} />
+          </div>
+        ))}
+        <button onClick={onAddRow}
+          className="flex items-center gap-2 bg-white hover:bg-gray-50 border-2 border-gray-200 text-gray-700 font-semibold px-4 py-2.5 rounded-xl transition text-sm">
+          <Plus className="w-4 h-4" /> Add Row
+        </button>
+        <button onClick={onImport} disabled={importing}
+          className="flex items-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-bold px-5 py-2.5 rounded-xl transition text-sm">
+          {importing ? <><Loader2 className="w-4 h-4 animate-spin" />Importing...</> : <><CheckCircle2 className="w-4 h-4" />Import to Database</>}
+        </button>
+      </div>
+
+      <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
+        <div className="overflow-x-auto rounded-xl border border-gray-200">
+          <table className="w-full text-xs">
+            <thead><tr className="bg-gray-50 text-gray-500">
+              <th className="px-2 py-2 text-left font-semibold">Yr</th>
+              <th className="px-2 py-2 text-left font-semibold">Sem</th>
+              <th className="px-2 py-2 text-left font-semibold min-w-[110px]">Course No.</th>
+              <th className="px-2 py-2 text-left font-semibold min-w-[220px]">Descriptive Title</th>
+              <th className="px-2 py-2 text-center font-semibold bg-amber-50">Units</th>
+              <th className="px-2 py-2 text-center font-semibold bg-amber-50">Lec</th>
+              <th className="px-2 py-2 text-center font-semibold bg-amber-50">Lab</th>
+              <th className="px-2 py-2 text-left font-semibold min-w-[140px]">Pre-requisite</th>
+              <th className="px-2 py-2"></th>
+            </tr></thead>
+            <tbody className="divide-y divide-gray-100">
+              {preview.subjects.map((s, i) => (
+                <tr key={i} className={s.needsReview ? 'bg-red-50' : 'hover:bg-gray-50'}>
+                  <td className="px-1 py-1">
+                    <select value={s.year_level} onChange={e => onUpdate(i, 'year_level', Number(e.target.value))}
+                      className="w-14 border border-gray-200 rounded px-1 py-1 text-xs">
+                      {[1,2,3,4].map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-1 py-1">
+                    <select value={s.semester} onChange={e => onUpdate(i, 'semester', Number(e.target.value))}
+                      className="w-16 border border-gray-200 rounded px-1 py-1 text-xs">
+                      <option value={1}>1st</option>
+                      <option value={2}>2nd</option>
+                      <option value={3}>Summer</option>
+                    </select>
+                  </td>
+                  <td className="px-1 py-1">
+                    <input value={s.course_code} onChange={e => onUpdate(i, 'course_code', e.target.value)}
+                      className={`w-full border rounded px-2 py-1 text-xs font-mono font-semibold ${!s.course_code?.trim() || s.course_code === '⚠ REVIEW' ? 'border-red-400 text-red-700' : 'border-gray-200 text-green-800'}`} />
+                  </td>
+                  <td className="px-1 py-1">
+                    <input value={s.descriptive_title} onChange={e => onUpdate(i, 'descriptive_title', e.target.value)}
+                      className={`w-full border rounded px-2 py-1 text-xs ${!s.descriptive_title?.trim() ? 'border-red-400' : 'border-gray-200'}`} />
+                  </td>
+                  <td className="px-1 py-1 bg-amber-50">
+                    <input type="number" step="0.5" value={s.units} onChange={e => onUpdate(i, 'units', e.target.value)}
+                      className="w-14 border border-amber-300 rounded px-1 py-1 text-xs text-center" />
+                  </td>
+                  <td className="px-1 py-1 bg-amber-50">
+                    <input type="number" step="0.5" value={s.lec_hours} onChange={e => onUpdate(i, 'lec_hours', e.target.value)}
+                      className="w-14 border border-amber-300 rounded px-1 py-1 text-xs text-center" />
+                  </td>
+                  <td className="px-1 py-1 bg-amber-50">
+                    <input type="number" step="0.5" value={s.lab_hours} onChange={e => onUpdate(i, 'lab_hours', e.target.value)}
+                      className="w-14 border border-amber-300 rounded px-1 py-1 text-xs text-center" />
+                  </td>
+                  <td className="px-1 py-1">
+                    <input value={s.prerequisite || ''} onChange={e => onUpdate(i, 'prerequisite', e.target.value)}
+                      placeholder="None" className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
+                  </td>
+                  <td className="px-1 py-1">
+                    <button onClick={() => onRemove(i)} className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ─── MAIN PAGE ─────────────────────────────────────────────── */
 export default function FacultyLoad() {
   const { user } = useAuth()
@@ -708,6 +831,13 @@ export default function FacultyLoad() {
   const [viewSubjects, setViewSubjects]   = useState([])
   const [viewGroups, setViewGroups]       = useState([])
   const [viewExpanded, setViewExpanded]   = useState({})
+
+  /* old-format (scanned PDF, OCR-based) prospectus upload — separate from
+     the trusted xlsx/docx path above: needs its own editable preview since
+     OCR isn't reliable enough to blind-import (see parseProspectusPdf.js) */
+  const pdfFileRef = useRef(null)
+  const [pdfParsing, setPdfParsing]       = useState(false)
+  const [pdfPreview, setPdfPreview]       = useState(null)   // { filename, subjects: [...] } — subjects are editable
 
   /* faculty loading tab state */
   const [loadYear, setLoadYear]   = useState('2026-2027')
@@ -884,6 +1014,76 @@ export default function FacultyLoad() {
     finally { setImporting(false) }
   }
 
+  /* ── Old-format (scanned PDF) prospectus handlers ── */
+  const handlePdfFileChange = (e) => {
+    const file = e.target.files[0]; if (!file) return
+    const reader = new FileReader()
+    reader.onload = async (evt) => {
+      setPdfParsing(true)
+      try {
+        const base64 = evt.target.result.split(',')[1]
+        const res = await prospectusAPI.parsePdf({ data: base64 })
+        const subjects = res.data.subjects.map(s => ({ ...s }))
+        setPdfPreview({ filename: file.name, subjects })
+        const reviewCount = subjects.filter(s => s.needsReview).length
+        toast.success(`OCR read ${subjects.length} rows${reviewCount ? ` (${reviewCount} flagged for review)` : ''} — check every row below before importing.`)
+      } catch (err) {
+        toast.error(err.response?.data?.message || 'Failed to read the PDF.')
+      } finally {
+        setPdfParsing(false)
+      }
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
+  const updatePdfSubject = (index, field, value) => {
+    setPdfPreview(prev => {
+      const subjects = [...prev.subjects]
+      subjects[index] = { ...subjects[index], [field]: value }
+      return { ...prev, subjects }
+    })
+  }
+
+  const removePdfSubject = (index) => {
+    setPdfPreview(prev => ({ ...prev, subjects: prev.subjects.filter((_, i) => i !== index) }))
+  }
+
+  const addPdfSubjectRow = () => {
+    setPdfPreview(prev => ({
+      ...prev,
+      subjects: [...prev.subjects, {
+        course_code: '', descriptive_title: '', units: 0, lec_hours: 0, lab_hours: 0,
+        year_level: 1, semester: 1, prerequisite: null, needsReview: false,
+      }],
+    }))
+  }
+
+  const [pdfImporting, setPdfImporting] = useState(false)
+  const handlePdfImport = async () => {
+    if (!pdfPreview) return
+    const cleaned = pdfPreview.subjects.map(s => ({
+      course_code: String(s.course_code || '').trim(),
+      descriptive_title: String(s.descriptive_title || '').trim(),
+      units: Number(s.units) || 0,
+      lec_hours: Number(s.lec_hours) || 0,
+      lab_hours: Number(s.lab_hours) || 0,
+      year_level: Number(s.year_level) || 1,
+      semester: Number(s.semester) || 1,
+      prerequisite: s.prerequisite ? String(s.prerequisite).trim() || null : null,
+    }))
+    if (cleaned.some(s => !s.course_code || !s.descriptive_title)) {
+      toast.error('Every row needs at least a Course Number and Descriptive Title — fix or remove the highlighted rows first.')
+      return
+    }
+    setPdfImporting(true)
+    try {
+      const r = await prospectusAPI.import({ program: programName, academic_year: academicYear, filename: pdfPreview.filename, subjects: cleaned })
+      toast.success(`Imported ${r.data.count} subjects!`); setPdfPreview(null); fetchProspectuses()
+    } catch (err) { toast.error(err.response?.data?.message || 'Import failed.') }
+    finally { setPdfImporting(false) }
+  }
+
   const handleDeleteProspectus = async (p) => {
     if (!confirm(`Delete "${p.program} ${p.academic_year || ''}"?`)) return
     try { await prospectusAPI.remove(p.id); toast.success('Deleted.'); if (viewId===p.id){setViewId(null);setViewSubjects([]);setViewGroups([])} fetchProspectuses() }
@@ -999,7 +1199,8 @@ export default function FacultyLoad() {
   // specialist even past the cap rather than leave a subject unassigned, so
   // this has to be checked before submitting (mirrors the server-side guard).
   const groupCredit = (grp) => {
-    const totalCredit = grp.entries.reduce((a,e)=>a+unitCredit(e.lec_hours,e.lab_hours),0)
+    // NSTP does not count toward the unit-credit cap.
+    const totalCredit = grp.entries.filter(e=>!isNstp(e.course_code)).reduce((a,e)=>a+unitCredit(e.lec_hours,e.lab_hours),0)
     const otherCredit  = grp.instructorId ? adminLoads.filter(l => l.instructor_id === grp.instructorId).reduce((a,l)=>a+Number(l.units),0) : 0
     return totalCredit + otherCredit
   }
@@ -1028,13 +1229,33 @@ export default function FacultyLoad() {
       {/* ── TAB 1: PROSPECTUS ── */}
       {tab === 'prospectus' && (
         <div>
-          <div className="flex justify-end mb-4">
+          <div className="flex justify-end gap-2 mb-4">
+            <button onClick={() => pdfFileRef.current?.click()} disabled={pdfParsing}
+              className="flex items-center gap-2 bg-white hover:bg-gray-50 disabled:opacity-60 border-2 border-gray-200 text-gray-700 font-semibold px-4 py-2.5 rounded-xl transition text-sm">
+              {pdfParsing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {pdfParsing ? 'Reading scanned PDF (OCR)…' : 'Upload Old-Format Prospectus (.pdf)'}
+            </button>
             <button onClick={() => fileRef.current?.click()}
               className="flex items-center gap-2 bg-green-700 hover:bg-green-800 text-white font-semibold px-4 py-2.5 rounded-xl transition shadow text-sm">
               <Upload className="w-4 h-4" /> Upload Prospectus (.xlsx or .docx)
             </button>
           </div>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.docx" className="hidden" onChange={handleFileChange} />
+          <input ref={pdfFileRef} type="file" accept=".pdf" className="hidden" onChange={handlePdfFileChange} />
+
+          {pdfPreview && (
+            <PdfPreviewPanel
+              preview={pdfPreview}
+              programName={programName} setProgramName={setProgramName}
+              academicYear={academicYear} setAcademicYear={setAcademicYear}
+              onUpdate={updatePdfSubject}
+              onRemove={removePdfSubject}
+              onAddRow={addPdfSubjectRow}
+              onImport={handlePdfImport}
+              onCancel={() => setPdfPreview(null)}
+              importing={pdfImporting}
+            />
+          )}
 
           {preview && (
             <div className="mb-8 bg-white rounded-2xl shadow-sm border-2 border-green-400">
@@ -1387,11 +1608,14 @@ export default function FacultyLoad() {
             <div className="space-y-5">
               {visibleGroupedInstructors.map((grp, gi) => {
                 const isUnassigned  = grp.entries[0] && !grp.entries[0].assigned_instructor_id
-                const totalU        = grp.entries.reduce((a,e)=>a+Number(e.units),0)
-                const totalLec      = grp.entries.reduce((a,e)=>a+Number(e.lec_hours),0)
-                const totalLab      = grp.entries.reduce((a,e)=>a+Number(e.lab_hours),0)
-                const totalCredit   = grp.entries.reduce((a,e)=>a+unitCredit(e.lec_hours,e.lab_hours),0)
-                const totalContact  = grp.entries.reduce((a,e)=>a+contactHours(e.lec_hours,e.lab_hours),0)
+                // NSTP does not count toward the unit-credit cap this card is
+                // monitoring — excluded from every figure below.
+                const loadEntries   = grp.entries.filter(e=>!isNstp(e.course_code))
+                const totalU        = loadEntries.reduce((a,e)=>a+Number(e.units),0)
+                const totalLec      = loadEntries.reduce((a,e)=>a+Number(e.lec_hours),0)
+                const totalLab      = loadEntries.reduce((a,e)=>a+Number(e.lab_hours),0)
+                const totalCredit   = loadEntries.reduce((a,e)=>a+unitCredit(e.lec_hours,e.lab_hours),0)
+                const totalContact  = loadEntries.reduce((a,e)=>a+contactHours(e.lec_hours,e.lab_hours),0)
                 const instructorLoads = isUnassigned ? [] : adminLoads.filter(l => l.instructor_id === grp.instructorId)
                 // Other Loads have no lec/lab hours — their unit credit is just their unit value directly
                 const totalOther       = instructorLoads.reduce((a,l)=>a+Number(l.units),0)
