@@ -19,7 +19,7 @@ export default function Sidebar({ navItems, roleLabel }) {
 
   return (
     <>
-      <aside className="w-64 min-h-screen bg-green-900 flex flex-col shrink-0 shadow-xl">
+      <aside className="w-64 h-screen sticky top-0 self-start bg-green-900 flex flex-col shrink-0 shadow-xl">
         {/* Brand */}
         <div className="px-5 py-5 border-b border-green-800">
           <div className="flex items-center gap-3">

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
-import { prospectusAPI } from '../../services/api.js'
+import { prospectusAPI, usersAPI } from '../../services/api.js'
+import { useAuth } from '../../context/AuthContext.jsx'
 import PageHeader from '../../components/ui/PageHeader.jsx'
+import ProgramPicker from '../../components/common/ProgramPicker.jsx'
 import {
   BookOpen, CheckCircle2, Loader2, ChevronDown, ChevronUp,
   GraduationCap, Save, FlaskConical, School, Users
@@ -28,10 +30,60 @@ function groupSubjects(subjects) {
   )
 }
 
+// Which program(s) this person teaches for within their department — e.g. a
+// CCIS instructor can teach for BSIT, BSIS, or both. Auto-generate only offers
+// them the subjects of programs they've picked here (none picked = all).
+function MyPrograms() {
+  const { user } = useAuth()
+  const [programs, setPrograms] = useState([])
+  const [options, setOptions]   = useState([])
+  const [saving, setSaving]     = useState(false)
+  const [dirty, setDirty]       = useState(false)
+
+  useEffect(() => {
+    Promise.all([usersAPI.getOne(user.id), usersAPI.getProgramOptions(user.department)])
+      .then(([me, opts]) => {
+        setPrograms(String(me.data.programs || '').split(',').map(p => p.trim()).filter(Boolean))
+        setOptions(opts.data)
+      })
+      .catch(() => {})
+  }, [user.id, user.department])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await usersAPI.setMyPrograms(programs)
+      toast.success('Programs saved.')
+      setDirty(false)
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to save programs.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 mb-5">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div>
+          <h3 className="font-bold text-gray-800 text-sm">I teach for these programs</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Pick BSIT, BSIS, or both — you'll only be assigned subjects from the programs you select.</p>
+        </div>
+        <button onClick={save} disabled={saving || !dirty}
+          className="shrink-0 flex items-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-xl transition text-sm">
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save Programs
+        </button>
+      </div>
+      <ProgramPicker value={programs} options={options} onChange={p => { setPrograms(p); setDirty(true) }} />
+    </div>
+  )
+}
+
 export default function MySpecialty() {
   const [subjects, setSubjects]   = useState([])
   const [groups, setGroups]       = useState([])
-  const [selected, setSelected]   = useState(new Set())
+  // subject id → priority (1 = first choice, 2 = second choice); presence = selected
+  const [selected, setSelected]   = useState(new Map())
   const [peers, setPeers]         = useState({})
   const [expanded, setExpanded]   = useState({})
   const [loading, setLoading]     = useState(true)
@@ -52,7 +104,7 @@ export default function MySpecialty() {
         const exp = {}
         g.forEach(grp => { exp[`${grp.year_level}-${grp.semester}`] = true })
         setExpanded(exp)
-        setSelected(new Set(selRes.data))
+        setSelected(new Map(selRes.data.map(sp => [sp.subject_id, sp.priority === 2 ? 2 : 1])))
         setPeers(peersRes.data)
       } catch {
         toast.error('Failed to load subjects.')
@@ -65,16 +117,20 @@ export default function MySpecialty() {
 
   const toggle = (id) => {
     setSelected(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      const next = new Map(prev)
+      next.has(id) ? next.delete(id) : next.set(id, 1)   // newly picked subjects start as 1st priority
       return next
     })
   }
 
+  const setPriority = (id, priority) => {
+    setSelected(prev => new Map(prev).set(id, priority))
+  }
+
   const toggleAll = (groupSubjects, checked) => {
     setSelected(prev => {
-      const next = new Set(prev)
-      groupSubjects.forEach(s => checked ? next.add(s.id) : next.delete(s.id))
+      const next = new Map(prev)
+      groupSubjects.forEach(s => checked ? (next.has(s.id) || next.set(s.id, 1)) : next.delete(s.id))
       return next
     })
   }
@@ -82,7 +138,7 @@ export default function MySpecialty() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await prospectusAPI.saveMySpecialties([...selected])
+      await prospectusAPI.saveMySpecialties([...selected].map(([subject_id, priority]) => ({ subject_id, priority })))
       toast.success(`Saved ${selected.size} subject specialt${selected.size === 1 ? 'y' : 'ies'} successfully.`)
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to save.')
@@ -109,6 +165,7 @@ export default function MySpecialty() {
     return (
       <div>
         <PageHeader title="My Teaching Specialty" subtitle="Select the subjects you are qualified to teach." />
+        <MyPrograms />
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center py-20 text-gray-400">
           <BookOpen className="w-12 h-12 mb-3 opacity-30" />
           <p className="font-semibold text-gray-500">No prospectus has been uploaded yet.</p>
@@ -122,7 +179,7 @@ export default function MySpecialty() {
     <div>
       <PageHeader
         title="My Teaching Specialty"
-        subtitle="Select all subjects you are qualified and willing to teach. The Chair uses this to assign your faculty load."
+        subtitle="Select the subjects you can teach and mark each as 1st or 2nd priority. Your 1st-priority subjects are assigned to you first (all their sections); 2nd-priority subjects only fill in if you still have room in your load."
         action={
           <button onClick={handleSave} disabled={saving}
             className="flex items-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-semibold px-4 py-2.5 rounded-xl transition shadow text-sm">
@@ -132,6 +189,8 @@ export default function MySpecialty() {
           </button>
         }
       />
+
+      <MyPrograms />
 
       {/* Semester filter */}
       {availableSemesters.length > 1 && (
@@ -154,15 +213,16 @@ export default function MySpecialty() {
             of {visibleSubjects.length} subjects selected as my specialty
             {semFilter !== 'all' && ` (${SEM_LABEL[semFilter] || semFilter})`}
             {selected.size > 0 && semFilter !== 'all' && ` — ${selected.size} total across all semesters`}
+            {selected.size > 0 && ` · ${[...selected.values()].filter(p => p === 1).length} first priority, ${[...selected.values()].filter(p => p === 2).length} second priority`}
           </span>
         </div>
         <div className="ml-auto flex gap-2">
-          <button onClick={() => setSelected(prev => new Set([...prev, ...visibleSubjects.map(s => s.id)]))}
+          <button onClick={() => setSelected(prev => { const next = new Map(prev); visibleSubjects.forEach(s => next.has(s.id) || next.set(s.id, 1)); return next })}
             className="text-xs bg-green-100 hover:bg-green-200 text-green-800 font-semibold px-3 py-1.5 rounded-lg transition">
             Select All
           </button>
           <button onClick={() => setSelected(prev => {
-            const next = new Set(prev)
+            const next = new Map(prev)
             visibleSubjects.forEach(s => next.delete(s.id))
             return next
           })}
@@ -257,6 +317,19 @@ export default function MySpecialty() {
                             {s.prerequisite && <span className="ml-2 text-amber-600">Pre-req: {s.prerequisite}</span>}
                           </p>
                         </div>
+                        {isSelected && (
+                          <div className="flex rounded-lg overflow-hidden border border-green-300 shrink-0 self-center text-xs font-bold" title="1st priority subjects are assigned to you first; 2nd priority only fill in while you still have room in your load">
+                            {[1, 2].map(p => (
+                              <button key={p} type="button"
+                                onClick={e => { e.preventDefault(); e.stopPropagation(); setPriority(s.id, p) }}
+                                className={`px-2.5 py-1 transition ${selected.get(s.id) === p
+                                  ? (p === 1 ? 'bg-green-700 text-white' : 'bg-amber-500 text-white')
+                                  : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                                {p === 1 ? '1st' : '2nd'}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         {isSelected && <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />}
                       </label>
                     )

@@ -346,13 +346,14 @@ router.delete('/:id', authenticate, authorize('chair', 'admin'), async (req, res
 })
 
 // GET /api/prospectus/specialties/me  — instructor gets their saved specialties
+// as [{ subject_id, priority }] (priority 1 = first choice, 2 = second choice)
 router.get('/specialties/me', authenticate, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT subject_id FROM instructor_specialties WHERE instructor_id = ?',
+      'SELECT subject_id, priority FROM instructor_specialties WHERE instructor_id = ?',
       [req.user.id]
     )
-    res.json(rows.map(r => r.subject_id))
+    res.json(rows)
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
   }
@@ -361,24 +362,32 @@ router.get('/specialties/me', authenticate, async (req, res) => {
 // PUT /api/prospectus/specialties/me  — instructor (or a Chair/Dean who also
 // teaches) saves their specialties
 router.put('/specialties/me', authenticate, authorize('instructor', 'chair', 'dean'), async (req, res) => {
-  const { subject_ids } = req.body
-  if (!Array.isArray(subject_ids)) {
-    return res.status(400).json({ message: 'subject_ids must be an array.' })
+  // Preferred shape: specialties = [{ subject_id, priority }] where priority
+  // is 1 (first priority) or 2 (second priority). The older subject_ids
+  // array is still accepted and means "all first priority".
+  const { subject_ids, specialties } = req.body
+  let picks
+  if (Array.isArray(specialties)) {
+    picks = specialties.map(sp => ({ subject_id: sp.subject_id, priority: Number(sp.priority) === 2 ? 2 : 1 }))
+  } else if (Array.isArray(subject_ids)) {
+    picks = subject_ids.map(id => ({ subject_id: id, priority: 1 }))
+  } else {
+    return res.status(400).json({ message: 'specialties must be an array.' })
   }
 
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
     await conn.query('DELETE FROM instructor_specialties WHERE instructor_id = ?', [req.user.id])
-    if (subject_ids.length > 0) {
-      const rows = subject_ids.map(id => [req.user.id, id])
+    if (picks.length > 0) {
+      const rows = picks.map(p => [req.user.id, p.subject_id, p.priority])
       await conn.query(
-        'INSERT IGNORE INTO instructor_specialties (instructor_id, subject_id) VALUES ?',
+        'INSERT IGNORE INTO instructor_specialties (instructor_id, subject_id, priority) VALUES ?',
         [rows]
       )
     }
     await conn.commit()
-    res.json({ message: 'Specialties saved.', count: subject_ids.length })
+    res.json({ message: 'Specialties saved.', count: picks.length })
   } catch (err) {
     await conn.rollback()
     res.status(500).json({ message: 'Server error.', error: err.message })
@@ -438,11 +447,11 @@ router.get('/specialties/peers', authenticate, authorize('instructor', 'chair', 
 router.get('/specialties/instructor/:id', authenticate, authorize('chair', 'admin'), async (req, res) => {
   try {
     const [rows] = await pool.query(`
-      SELECT ps.*, isp.created_at AS selected_at
+      SELECT ps.*, isp.priority, isp.created_at AS selected_at
       FROM instructor_specialties isp
       JOIN prospectus_subjects ps ON isp.subject_id = ps.id
       WHERE isp.instructor_id = ?
-      ORDER BY ps.year_level, ps.semester
+      ORDER BY isp.priority, ps.year_level, ps.semester
     `, [req.params.id])
     res.json(rows)
   } catch (err) {
