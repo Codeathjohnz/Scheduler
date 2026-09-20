@@ -9,12 +9,60 @@ const router = Router()
 router.get('/', authenticate, authorize('admin'), async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT id, username, name, role, department, section, email, mobility_level, created_at FROM users ORDER BY role, name'
+      'SELECT id, username, name, role, department, section, programs, email, mobility_level, created_at FROM users ORDER BY role, name'
     )
     res.json(rows)
   } catch (err) {
     console.error('[GET /users] DB error:', err.message)
     res.status(500).json({ message: err.message })
+  }
+})
+
+// Programs an instructor teaches for within their department (e.g. BSIT, BSIS,
+// or both), stored comma-separated. Empty = not restricted to any program.
+function cleanPrograms(val) {
+  const list = Array.isArray(val) ? val : String(val || '').split(',')
+  const seen = new Set()
+  const out = []
+  for (const p of list.map(x => String(x).trim()).filter(Boolean)) {
+    if (!seen.has(p.toUpperCase())) { seen.add(p.toUpperCase()); out.push(p) }
+  }
+  return out.length ? out.join(',') : null
+}
+
+// GET /api/users/program-options?department=CCIS — programs a department is
+// known to have: every program its chairs have uploaded a prospectus for, plus
+// any already assigned to that department's users (so a program someone
+// typed in stays selectable for the next person).
+router.get('/program-options', authenticate, async (req, res) => {
+  const { department } = req.query
+  if (!department) return res.json([])
+  try {
+    const [rows] = await pool.query(
+      `SELECT DISTINCT p.program AS program FROM prospectus p
+       JOIN users u ON p.uploaded_by = u.id WHERE u.department = ?`,
+      [department]
+    )
+    const [userRows] = await pool.query(
+      'SELECT programs FROM users WHERE department = ? AND programs IS NOT NULL', [department]
+    )
+    const seen = new Map()
+    for (const r of rows) if (r.program) seen.set(r.program.toUpperCase(), r.program)
+    for (const r of userRows) for (const p of r.programs.split(',')) if (p.trim()) seen.set(p.trim().toUpperCase(), p.trim())
+    res.json([...seen.values()].sort())
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.', error: err.message })
+  }
+})
+
+// PUT /api/users/me/programs — an instructor (or a chair/dean who also
+// teaches) sets which programs they teach for. body: { programs: ['BSIT','BSIS'] }
+router.put('/me/programs', authenticate, authorize('instructor', 'chair', 'dean'), async (req, res) => {
+  try {
+    await pool.query('UPDATE users SET programs = ? WHERE id = ?', [cleanPrograms(req.body.programs), req.user.id])
+    res.json({ message: 'Programs saved.' })
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.', error: err.message })
   }
 })
 
@@ -75,7 +123,7 @@ router.get('/:id', authenticate, async (req, res) => {
   }
   try {
     const [[user]] = await pool.query(
-      'SELECT id, username, name, role, department, section, email, mobility_level, created_at FROM users WHERE id = ?',
+      'SELECT id, username, name, role, department, section, programs, email, mobility_level, created_at FROM users WHERE id = ?',
       [req.params.id]
     )
     if (!user) return res.status(404).json({ message: 'User not found.' })
@@ -87,7 +135,7 @@ router.get('/:id', authenticate, async (req, res) => {
 
 // POST create user (admin only)
 router.post('/', authenticate, authorize('admin'), async (req, res) => {
-  const { username, password, name, role, department, section, email } = req.body
+  const { username, password, name, role, department, section, email, programs } = req.body
 
   if (!username || !password || !name || !role) {
     return res.status(400).json({ message: 'Username, password, name, and role are required.' })
@@ -104,12 +152,12 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
 
     const hash = await bcrypt.hash(password, 10)
     const [result] = await pool.query(
-      'INSERT INTO users (username, password_hash, name, role, department, section, email) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [username, hash, name, role, department || null, section || null, email || null]
+      'INSERT INTO users (username, password_hash, name, role, department, section, programs, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [username, hash, name, role, department || null, section || null, cleanPrograms(programs), email || null]
     )
     res.status(201).json({
       message: 'User created successfully.',
-      user: { id: result.insertId, username, name, role, department, section, email }
+      user: { id: result.insertId, username, name, role, department, section, programs: cleanPrograms(programs), email }
     })
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
@@ -118,7 +166,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
 
 // PUT update user (admin only)
 router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
-  const { name, role, department, section, email, password } = req.body
+  const { name, role, department, section, email, password, programs } = req.body
   try {
     const [[user]] = await pool.query('SELECT id FROM users WHERE id = ?', [req.params.id])
     if (!user) return res.status(404).json({ message: 'User not found.' })
@@ -126,18 +174,18 @@ router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
     if (password) {
       const hash = await bcrypt.hash(password, 10)
       await pool.query(
-        'UPDATE users SET name=?, role=?, department=?, section=?, email=?, password_hash=? WHERE id=?',
-        [name, role, department || null, section || null, email || null, hash, req.params.id]
+        'UPDATE users SET name=?, role=?, department=?, section=?, programs=?, email=?, password_hash=? WHERE id=?',
+        [name, role, department || null, section || null, cleanPrograms(programs), email || null, hash, req.params.id]
       )
     } else {
       await pool.query(
-        'UPDATE users SET name=?, role=?, department=?, section=?, email=? WHERE id=?',
-        [name, role, department || null, section || null, email || null, req.params.id]
+        'UPDATE users SET name=?, role=?, department=?, section=?, programs=?, email=? WHERE id=?',
+        [name, role, department || null, section || null, cleanPrograms(programs), email || null, req.params.id]
       )
     }
 
     const [[updated]] = await pool.query(
-      'SELECT id, username, name, role, department, section, email FROM users WHERE id = ?',
+      'SELECT id, username, name, role, department, section, programs, email FROM users WHERE id = ?',
       [req.params.id]
     )
     res.json({ message: 'User updated.', user: updated })

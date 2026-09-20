@@ -20,6 +20,8 @@ import schedulingRoutes from './routes/scheduling.js'
 import adminRoutes from './routes/admin.js'
 import buildingPriorityRoutes from './routes/buildingPriorities.js'
 import loadRequestRoutes from './routes/loadRequests.js'
+import pool from './config/db.js'
+import { runMigrations } from './utils/migrate.js'
 
 dotenv.config()
 
@@ -58,6 +60,10 @@ if (clientDist) {
   app.use((req, res) => res.sendFile(join(clientDist, 'index.html')))
   console.log(`Serving frontend from: ${clientDist}`)
 }
+
+// Bring an existing database (e.g. live, after a redeploy) up to date before
+// taking requests — idempotent, see utils/migrate.js.
+await runMigrations(pool)
 
 const PORT = process.env.PORT || 5000
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`))

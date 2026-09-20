@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import PageHeader from '../../components/ui/PageHeader.jsx'
+import ProgramPicker from '../../components/common/ProgramPicker.jsx'
 import { usersAPI, prospectusAPI } from '../../services/api.js'
 import toast from 'react-hot-toast'
 import {
@@ -21,7 +22,9 @@ const ROLES = [
 
 const ROLE_MAP = Object.fromEntries(ROLES.map(r => [r.value, r]))
 
-const EMPTY_FORM = { username: '', password: '', name: '', role: 'instructor', department: '', section: '', email: '' }
+const EMPTY_FORM = { username: '', password: '', name: '', role: 'instructor', department: '', section: '', email: '', programs: [] }
+
+const splitPrograms = (v) => String(v || '').split(',').map(p => p.trim()).filter(Boolean)
 
 /* ── Instructor Detail Modal ─────────────────────────────────────────────── */
 function InstructorDetailModal({ user, onClose }) {
@@ -115,6 +118,9 @@ function InstructorDetailModal({ user, onClose }) {
                     {subjects.map(s => (
                       <div key={s.id} className="flex items-start gap-3 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2.5">
                         <span className="shrink-0 font-mono text-xs font-bold text-amber-700 pt-0.5 min-w-[90px]">{s.course_code}</span>
+                        <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full self-start ${s.priority === 2 ? 'bg-amber-200 text-amber-900' : 'bg-green-200 text-green-900'}`}>
+                          {s.priority === 2 ? '2nd' : '1st'}
+                        </span>
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-semibold text-gray-700 leading-snug">{s.descriptive_title}</p>
                           <p className="text-[10px] text-gray-400 mt-0.5">
@@ -155,6 +161,7 @@ export default function UserManagement() {
   const [showPw, setShowPw]       = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [viewUser, setViewUser]         = useState(null)    // instructor detail panel
+  const [programOptions, setProgramOptions] = useState([])   // programs known for the form's department
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -168,6 +175,15 @@ export default function UserManagement() {
   }, [])
 
   useEffect(() => { fetchUsers() }, [fetchUsers])
+
+  // Programs to offer in the instructor form follow the chosen department.
+  useEffect(() => {
+    if (!showModal || form.role !== 'instructor' || !form.department.trim()) { setProgramOptions([]); return }
+    const t = setTimeout(() => {
+      usersAPI.getProgramOptions(form.department.trim()).then(r => setProgramOptions(r.data)).catch(() => setProgramOptions([]))
+    }, 300)
+    return () => clearTimeout(t)
+  }, [showModal, form.role, form.department])
 
   const openCreate = () => {
     setEditUser(null)
@@ -186,6 +202,7 @@ export default function UserManagement() {
       department: user.department || '',
       section:    user.section    || '',
       email:      user.email      || '',
+      programs:   splitPrograms(user.programs),
     })
     setShowPw(false)
     setShowModal(true)
@@ -206,12 +223,12 @@ export default function UserManagement() {
     setSaving(true)
     try {
       if (editUser) {
-        const payload = { name: form.name, role: form.role, department: form.department, section: form.section, email: form.email }
+        const payload = { name: form.name, role: form.role, department: form.department, section: form.section, email: form.email, programs: form.role === 'instructor' ? form.programs : [] }
         if (form.password) payload.password = form.password
         await usersAPI.update(editUser.id, payload)
         toast.success('User updated successfully.')
       } else {
-        await usersAPI.create(form)
+        await usersAPI.create({ ...form, programs: form.role === 'instructor' ? form.programs : [] })
         toast.success('User created successfully.')
       }
       closeModal()
@@ -342,6 +359,15 @@ export default function UserManagement() {
                     <td className="px-5 py-3 text-gray-500 text-xs">
                       {u.department || '—'}
                       {u.section && <span className="ml-1 text-green-600 font-medium">· {u.section}</span>}
+                      {u.role === 'instructor' && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {splitPrograms(u.programs).length > 0
+                            ? splitPrograms(u.programs).map(p => (
+                                <span key={p} className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-100 text-green-800">{p}</span>
+                              ))
+                            : <span className="text-[10px] text-gray-400 italic">No program set</span>}
+                        </div>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-gray-400 text-xs">
                       {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
@@ -468,6 +494,17 @@ export default function UserManagement() {
                   <option value="Registrar's Office" />
                 </datalist>
               </div>
+
+              {/* Programs — instructors only: which program(s) they teach for */}
+              {form.role === 'instructor' && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">
+                    Teaches for Program(s)
+                    <span className="text-gray-400 font-normal"> (e.g. BSIT, BSIS, or both)</span>
+                  </label>
+                  <ProgramPicker value={form.programs} onChange={programs => setForm(f => ({ ...f, programs }))} options={programOptions} />
+                </div>
+              )}
 
               {/* Section — only for students */}
               {needsSection && (

@@ -623,7 +623,7 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
                 <optgroup label="⭐ Has Specialty (Recommended)">
                   {specialists.map(i => (
                     <option key={i.id} value={i.id}>
-                      {i.name} [{i.department}]{roleTag(i)} — {i.current_units} units loaded
+                      {i.name} [{i.department}]{roleTag(i)}{i.specialty_priority ? ` · ${i.specialty_priority === 2 ? '2nd' : '1st'} priority` : ''} — {i.current_units} units loaded
                     </option>
                   ))}
                 </optgroup>

@@ -250,13 +250,15 @@ router.get('/instructors/:subjectId', authenticate, authorize('chair', 'admin'),
       SELECT u.id, u.name, u.department, u.role,
         (SELECT COUNT(*) FROM instructor_specialties isp
          WHERE isp.instructor_id = u.id AND isp.subject_id = ?) AS has_specialty,
+        (SELECT MIN(isp3.priority) FROM instructor_specialties isp3
+         WHERE isp3.instructor_id = u.id AND isp3.subject_id = ?) AS specialty_priority,
         (u.department = 'General Education') AS is_ge,
         (u.department = 'PATHFIT') AS is_pathfit,
         (u.department = 'NSTP') AS is_nstp
       FROM users u
       WHERE u.role IN ('instructor', 'chair', 'dean') AND ${deptCondition}
-      ORDER BY has_specialty DESC, u.name ASC
-    `, [req.params.subjectId, ...deptParams])
+      ORDER BY has_specialty DESC, specialty_priority ASC, u.name ASC
+    `, [req.params.subjectId, req.params.subjectId, ...deptParams])
 
     const result = instructors.map(i => ({
       ...i,
@@ -471,8 +473,8 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
       : ''
     const deptParam = dept ? [dept] : []
     const [instructors] = await pool.query(`
-      SELECT u.id, u.name, u.department,
-        GROUP_CONCAT(isp.subject_id) AS specialty_ids
+      SELECT u.id, u.name, u.department, u.programs,
+        GROUP_CONCAT(CONCAT(isp.subject_id, ':', isp.priority)) AS specialty_ids
       FROM users u
       LEFT JOIN instructor_specialties isp ON isp.instructor_id = u.id
       WHERE u.role IN ('instructor', 'chair', 'dean') ${deptFilter}
@@ -487,13 +489,15 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
     const otherLoadMap = await getOtherLoadMap(academic_year, semester)
     const loadMap = await getCombinedLoadMap(academic_year, semester)
 
-    // Build map: subject_id → [instructor_id, ...]
+    // Build map: subject_id → { 1: [first-priority instructor ids], 2: [second-priority ids] }
+    // Each instructor tags every specialty as 1st or 2nd priority (My Specialty page).
     const specialtyMap = {}
     for (const inst of instructors) {
-      const ids = inst.specialty_ids ? inst.specialty_ids.split(',').map(Number) : []
-      for (const sid of ids) {
-        if (!specialtyMap[sid]) specialtyMap[sid] = []
-        specialtyMap[sid].push(inst.id)
+      const picks = inst.specialty_ids ? inst.specialty_ids.split(',') : []
+      for (const pick of picks) {
+        const [sid, prio] = pick.split(':').map(Number)
+        if (!specialtyMap[sid]) specialtyMap[sid] = { 1: [], 2: [] }
+        specialtyMap[sid][prio === 2 ? 2 : 1].push(inst.id)
       }
     }
     // Partition the pool so GE subjects only draw from GE instructors,
@@ -503,8 +507,17 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
     const geInstructorIds      = instructors.filter(i => i.department === 'General Education').map(i => i.id)
     const pathfitInstructorIds = instructors.filter(i => i.department === 'PATHFIT').map(i => i.id)
     const nstpInstructorIds    = instructors.filter(i => i.department === 'NSTP').map(i => i.id)
+    // An instructor can be tagged with the programs they teach for (e.g. BSIT,
+    // BSIS or both — set by the admin or on their My Specialty page). One who
+    // is tagged is only eligible for a chair whose prospectus is one of those
+    // programs; untagged instructors stay eligible for every program in the
+    // department, as before.
+    const teachesProgram = (i) => {
+      const list = String(i.programs || '').split(',').map(p => p.trim().toUpperCase()).filter(Boolean)
+      return !list.length || list.includes(String(program || '').trim().toUpperCase())
+    }
     const majorInstructorIds   = instructors.filter(i =>
-      i.department !== 'General Education' && i.department !== 'PATHFIT' && i.department !== 'NSTP'
+      i.department !== 'General Education' && i.department !== 'PATHFIT' && i.department !== 'NSTP' && teachesProgram(i)
     ).map(i => i.id)
 
     // Clear existing entries first if requested
@@ -533,55 +546,89 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
       for (const e of existingRows) existingMap.set(`${e.subject_id}|${e.program_yr_sec}`, e)
     }
 
-    // Pick the least-loaded eligible instructor, preferring one that stays within
-    // TARGET_UNITS unit credit; reach into the MAX_UNITS overflow zone if nobody
-    // has room within the standard load. If a subject has a specialist but even
-    // the least-loaded one is already past MAX_UNITS, assign them anyway rather
-    // than leaving a specialized subject unassigned — the chair sees this as a
-    // visible overload on their card and can rebalance (unassign a subject,
-    // reduce their other load, or add a second specialist) before submitting.
-    // Only returns null when there is no specialist at all to assign.
-    function pickInstructor(candidateIds, subjectCredit) {
-      const sorted = [...new Set(candidateIds)].sort((a, b) => (loadMap[a] || 0) - (loadMap[b] || 0))
-      return sorted.find(id => (loadMap[id] || 0) + subjectCredit <= TARGET_UNITS)
-          ?? sorted.find(id => (loadMap[id] || 0) + subjectCredit <= MAX_UNITS)
-          ?? sorted[0]
-          ?? null
+    // ── Priority-ordered assignment ────────────────────────────────────────────
+    // Every specialty is tagged 1st or 2nd priority by the instructor. Subjects
+    // are handed out in passes so first choices always win before any second
+    // choice is considered, and an instructor only picks up their second-priority
+    // subjects once they still have room under the standard load:
+    //   1. FIRST-priority specialists with room within TARGET_UNITS (21)
+    //   2. SECOND-priority specialists with room within TARGET_UNITS
+    //   3. Overflow: first- then second-priority specialists up to MAX_UNITS (27)
+    //   4. Last resort: a specialist even past MAX_UNITS, rather than leaving a
+    //      specialized subject unassigned — the chair sees the visible overload
+    //      on their card and can rebalance before submitting.
+    // A subject with no specialist at all is left unassigned for the chair to
+    // assign manually. Within a subject, all its sections stick with the same
+    // instructor (BSIT 2A, 2B, 2C of one course go to one person) for as long as
+    // they have room, and only then spill to the next specialist. GE subjects
+    // only draw from GE instructors, PATHFIT from PATHFIT, NSTP from NSTP, and
+    // major subjects only from department instructors. NSTP never counts toward
+    // the cap, so it never uses up an instructor's room.
+    const byLoad = (ids) => [...new Set(ids)].sort((a, b) => (loadMap[a] || 0) - (loadMap[b] || 0))
+    const stickyBySubject = new Map()   // subject id → instructor already teaching its earlier sections
+    for (const e of existingMap.values()) {
+      if (e.assigned_instructor_id && !stickyBySubject.has(e.subject_id)) stickyBySubject.set(e.subject_id, e.assigned_instructor_id)
     }
 
-    // Generate entries — one per subject per configured section. Only instructors
-    // who selected the subject as their specialty are ever assigned; a subject
-    // with no specialist is left unassigned for the chair to assign manually,
-    // rather than falling back to a non-specialist just to balance units. GE
-    // subjects only draw from GE instructors, PATHFIT subjects only draw from
-    // PATHFIT instructors, NSTP subjects only draw from NSTP instructors, and
-    // major subjects only draw from department instructors.
+    const pending = []   // { idx, sub, credit, first[], second[] } for entries that still need an instructor
+    expandedSubjects.forEach((sub, idx) => {
+      const existing = existingMap.get(`${sub.id}|${sub.program_yr_sec}`)
+      if (existing?.assigned_instructor_id) return
+      const eligiblePool = isGeneralEd(sub.course_code) ? geInstructorIds
+        : isPathfit(sub.course_code) ? pathfitInstructorIds
+        : isNstp(sub.course_code) ? nstpInstructorIds
+        : majorInstructorIds
+      const tiers = specialtyMap[sub.id] || { 1: [], 2: [] }
+      pending.push({
+        idx, sub,
+        credit: isNstp(sub.course_code) ? 0 : unitCredit(sub.lec_hours, sub.lab_hours),
+        first:  tiers[1].filter(id => eligiblePool.includes(id)),
+        second: tiers[2].filter(id => eligiblePool.includes(id)),
+      })
+    })
+
+    const assignments = new Map()   // expandedSubjects index → instructor id
+    const give = (p, id) => {
+      assignments.set(p.idx, id)
+      loadMap[id] = (loadMap[id] || 0) + p.credit
+      stickyBySubject.set(p.sub.id, id)
+    }
+    // Try one tier: the subject's current instructor first (keeps sections together),
+    // otherwise the least-loaded specialist who still fits under `limit`.
+    const tryTier = (p, ids, limit) => {
+      const sticky = stickyBySubject.get(p.sub.id)
+      if (sticky && ids.includes(sticky) && (loadMap[sticky] || 0) + p.credit <= limit) { give(p, sticky); return true }
+      const pick = byLoad(ids).find(id => (loadMap[id] || 0) + p.credit <= limit)
+      if (pick == null) return false
+      give(p, pick)
+      return true
+    }
+    const runPass = (fn) => { for (const p of pending) if (!assignments.has(p.idx)) fn(p) }
+
+    runPass(p => tryTier(p, p.first,  TARGET_UNITS))
+    runPass(p => tryTier(p, p.second, TARGET_UNITS))
+    runPass(p => tryTier(p, p.first,  MAX_UNITS) || tryTier(p, p.second, MAX_UNITS))
+    runPass(p => {
+      const last = byLoad(p.first)[0] ?? byLoad(p.second)[0]
+      if (last != null) give(p, last)
+    })
+
     const rows = []
     const toFill = []   // [assignedId, entryId] — existing unassigned entries now filled
     let alreadyAssignedCount = 0
     let stillUnassignedCount = 0
-    for (const sub of expandedSubjects) {
+    expandedSubjects.forEach((sub, idx) => {
       const existing = existingMap.get(`${sub.id}|${sub.program_yr_sec}`)
       if (existing?.assigned_instructor_id) {
         alreadyAssignedCount++
-        continue
+        return
       }
-
-      const subjectCredit = unitCredit(sub.lec_hours, sub.lab_hours)
-      const isNstpSubject = isNstp(sub.course_code)
-      const eligiblePool = isGeneralEd(sub.course_code) ? geInstructorIds
-        : isPathfit(sub.course_code) ? pathfitInstructorIds
-        : isNstpSubject ? nstpInstructorIds
-        : majorInstructorIds
-      const specialists = (specialtyMap[sub.id] || []).filter(id => eligiblePool.includes(id))
-      const assignedId = pickInstructor(specialists, subjectCredit)
-      // NSTP does not count toward the unit-credit cap — see getCombinedLoadMap.
-      if (assignedId && !isNstpSubject) loadMap[assignedId] = (loadMap[assignedId] || 0) + subjectCredit
+      const assignedId = assignments.get(idx) ?? null
 
       if (existing) {
         if (assignedId) toFill.push([assignedId, existing.id])
         else stillUnassignedCount++
-        continue
+        return
       }
 
       rows.push([
@@ -592,7 +639,7 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
         sub.units, sub.lec_hours, sub.lab_hours,
         assignedId, null, sub.id, req.user.id
       ])
-    }
+    })
 
     if (rows.length) {
       await pool.query(`

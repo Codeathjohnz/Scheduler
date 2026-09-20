@@ -27,6 +27,8 @@ export const otpAPI = {
 export const usersAPI = {
   getAll:  ()           => api.get('/users'),
   getOne:  (id)         => api.get(`/users/${id}`),
+  getProgramOptions: (department) => api.get(`/users/program-options?department=${encodeURIComponent(department || '')}`),
+  setMyPrograms:     (programs)   => api.put('/users/me/programs', { programs }),
   create:  (data)       => api.post('/users', data),
   update:  (id, data)   => api.put(`/users/${id}`, data),
   remove:  (id)         => api.delete(`/users/${id}`),
