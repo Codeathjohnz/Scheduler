@@ -3,6 +3,7 @@ import PageHeader from '../../components/ui/PageHeader.jsx'
 import { schedulingAPI } from '../../services/api.js'
 import toast from 'react-hot-toast'
 import { Loader2, CalendarX2, Clock, DoorOpen, LayoutGrid, List } from 'lucide-react'
+import RoomTypeBadge, { roomTypeShort, roomMismatch } from '../../components/common/RoomTypeBadge.jsx'
 
 const DAYS      = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 const DAY_SHORT = { Monday:'Mon', Tuesday:'Tue', Wednesday:'Wed', Thursday:'Thu', Friday:'Fri', Saturday:'Sat' }
@@ -42,7 +43,7 @@ function Block({ slot }) {
     >
       <p className="font-bold text-[10px] leading-tight truncate" style={{ color: colors.text }}>{slot.course_code}</p>
       {height > 28 && <p className="text-[9px] leading-tight truncate opacity-80" style={{ color: colors.text }}>{slot.program_yr_sec}</p>}
-      {height > 42 && <p className="text-[9px] leading-tight truncate opacity-70" style={{ color: colors.text }}>{slot.room_name || '—'}</p>}
+      {height > 42 && <p className="text-[9px] leading-tight truncate opacity-70" style={{ color: colors.text }}>{slot.room_name || '—'}{slot.room_type ? ` · ${roomTypeShort(slot.room_type)}` : ''}{roomMismatch(slot) ? ' ⚠' : ''}</p>}
     </div>
   )
 }
@@ -192,6 +193,7 @@ export default function ChairScheduleView() {
                   <span className="flex items-center gap-1.5">
                     <DoorOpen className="w-3.5 h-3.5 text-gray-400" />
                     {s.room_name || '—'}
+                    <RoomTypeBadge type={s.room_type} />
                   </span>
                 </div>
               </div>

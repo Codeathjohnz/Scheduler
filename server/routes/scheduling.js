@@ -186,6 +186,17 @@ router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
       WHERE gs.id = ?
     `, [req.params.id])
 
+    // Keep lecture classes out of laboratories, and lab classes in them.
+    if (room_id) {
+      const [[room]] = await pool.query('SELECT building, room_number, room_type FROM rooms WHERE id = ?', [room_id])
+      if (room && self.session_type === 'lecture' && room.room_type === 'Laboratory') {
+        return res.status(400).json({ message: `${room.building} ${room.room_number} is a laboratory (LAB) — it's reserved for lab classes, not lectures.` })
+      }
+      if (room && self.session_type === 'lab' && room.room_type !== 'Laboratory') {
+        return res.status(400).json({ message: `${room.building} ${room.room_number} is a ${room.room_type} room — lab classes need a laboratory (LAB).` })
+      }
+    }
+
     const newDays  = days.split(',')
     const newStart = timeToMin(start_time)
     const newEnd   = timeToMin(end_time)

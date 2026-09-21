@@ -6,6 +6,7 @@ import {
   Cpu, Printer, AlertTriangle, CheckCircle2,
   Loader2, X, Edit2, Globe, Trash2
 } from 'lucide-react'
+import RoomTypeBadge, { roomTypeShort, roomMismatch } from '../../components/common/RoomTypeBadge.jsx'
 
 /* ── constants ─────────────────────────────────────────────────────────────── */
 const DAYS    = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
@@ -138,8 +139,8 @@ function EditModal({ slot, rooms, onSave, onClose }) {
                 const rms = rooms.filter(r => r.room_type === type)
                 if (!rms.length) return null
                 return (
-                  <optgroup key={type} label={type}>
-                    {rms.map(r => <option key={r.id} value={r.id}>{r.building} {r.room_number} (cap {r.capacity})</option>)}
+                  <optgroup key={type} label={type === 'Laboratory' ? 'Laboratory (LAB — lab classes only)' : type === 'Lecture' ? 'Lecture (LEC)' : type}>
+                    {rms.map(r => <option key={r.id} value={r.id}>{r.building} {r.room_number} [{roomTypeShort(r.room_type)}] (cap {r.capacity})</option>)}
                   </optgroup>
                 )
               })}
@@ -174,7 +175,7 @@ function ScheduleBlock({ slot, onEdit }) {
     >
       <p className="font-bold text-[10px] leading-tight truncate" style={{ color: colors.text }}>{slot.course_code}</p>
       {height > 30 && <p className="text-[9px] leading-tight truncate opacity-80" style={{ color: colors.text }}>{slot.program_yr_sec}</p>}
-      {height > 44 && <p className="text-[9px] leading-tight truncate opacity-70" style={{ color: colors.text }}>{slot.room_name || '—'}</p>}
+      {height > 44 && <p className="text-[9px] leading-tight truncate opacity-70" style={{ color: colors.text }}>{slot.room_name || '—'}{slot.room_type ? ` · ${roomTypeShort(slot.room_type)}` : ''}{roomMismatch(slot) ? ' ⚠' : ''}</p>}
       {slot.hasConflict && <span className="absolute top-0 right-0 bg-red-500 text-white text-[8px] px-1 py-0.5 rounded-bl">CONFLICT</span>}
       {slot.is_manual ? <span className="absolute bottom-0 right-0 bg-amber-400 text-green-900 text-[8px] px-1 rounded-tl">M</span> : null}
       <Edit2 className="w-2.5 h-2.5 absolute top-1 right-1 opacity-0 group-hover:opacity-60 transition" style={{ color: colors.text }} />
