@@ -484,10 +484,11 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
     lab_hours: editEntry.lab_hours,
     assigned_instructor_id: editEntry.assigned_instructor_id || '',
     room: editEntry.room || '',
+    request_note: '',
   } : {
     subject_id: '', course_code: '', descriptive_title: '',
     program_yr_sec: '', year_level: '', units: 3, lec_hours: 3, lab_hours: 0,
-    assigned_instructor_id: '', room: '',
+    assigned_instructor_id: '', room: '', request_note: '',
   })
 
   const [instructors, setInstructors]   = useState([])
@@ -541,11 +542,12 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
     finally { setSaving(false) }
   }
 
-  const specialists  = instructors.filter(i => i.has_specialty && !i.is_ge && !i.is_pathfit && !i.is_nstp)
+  const crossDept    = instructors.filter(i => i.cross_dept)
+  const specialists  = instructors.filter(i => i.has_specialty && !i.cross_dept && !i.is_ge && !i.is_pathfit && !i.is_nstp)
   const geInstr      = instructors.filter(i => i.is_ge)
   const pathfitInstr = instructors.filter(i => i.is_pathfit)
   const nstpInstr    = instructors.filter(i => i.is_nstp)
-  const others       = instructors.filter(i => !i.has_specialty && !i.is_ge && !i.is_pathfit && !i.is_nstp)
+  const others       = instructors.filter(i => !i.has_specialty && !i.cross_dept && !i.is_ge && !i.is_pathfit && !i.is_nstp)
 
   const roleTag = (i) => i.role === 'chair' ? ' (Chair)' : i.role === 'dean' ? ' (Dean)' : ''
 
@@ -655,6 +657,15 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
                   ))}
                 </optgroup>
               )}
+              {crossDept.length > 0 && (
+                <optgroup label="🤝 Other departments — they must agree first">
+                  {crossDept.map(i => (
+                    <option key={i.id} value={i.id}>
+                      {i.name} [{i.department}]{roleTag(i)}{i.specialty_summary ? ` · ${i.specialty_summary}` : ''} — {i.current_units} units loaded
+                    </option>
+                  ))}
+                </optgroup>
+              )}
               {others.length > 0 && (
                 <optgroup label="Other Instructors">
                   {others.map(i => (
@@ -665,6 +676,17 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
                 </optgroup>
               )}
             </select>
+            {crossDept.some(i => String(i.id) === String(form.assigned_instructor_id)) && (
+              <div className="mt-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 space-y-2">
+                <p className="text-xs text-blue-800">
+                  This instructor belongs to another department. Saving sends them a <strong>request</strong> — the subject stays unassigned
+                  and doesn't count toward their load until they accept and their own department approves.
+                </p>
+                <input value={form.request_note} onChange={e=>setForm(f=>({...f,request_note:e.target.value}))} maxLength={255}
+                  placeholder="Why this instructor? e.g. digital innovation in agriculture — 3 units, Mon/Wed"
+                  className="w-full border-2 border-blue-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-blue-500 bg-white" />
+              </div>
+            )}
             {specialists.length > 0 && (
               <p className="text-xs text-green-600 mt-1">
                 ⭐ {specialists.length} instructor{specialists.length>1?'s':''} ha{specialists.length>1?'ve':'s'} selected this subject as their specialty.
@@ -1109,8 +1131,10 @@ export default function FacultyLoad() {
 
   const handleEditEntry = async (form) => {
     try {
-      await facultyLoadAPI.update(editEntry.id, form)
-      toast.success('Updated!'); setEditEntry(null); fetchEntries()
+      const res = await facultyLoadAPI.update(editEntry.id, form)
+      if (res.data?.pending_request) toast.success(`Request sent to ${res.data.instructor_name} — the subject stays unassigned until they and their department agree.`, { duration: 6000 })
+      else toast.success('Updated!')
+      setEditEntry(null); fetchEntries()
     } catch (err) { toast.error(err.response?.data?.message || 'Failed to update.') }
   }
 
@@ -1134,8 +1158,8 @@ export default function FacultyLoad() {
   const handleAssignToInstructor = async (entry, instructorId, instructorName) => {
     setAssigningId(entry.id)
     try {
-      await facultyLoadAPI.update(entry.id, { ...entry, assigned_instructor_id: instructorId })
-      toast.success(`Assigned to ${instructorName}.`)
+      const res = await facultyLoadAPI.update(entry.id, { ...entry, assigned_instructor_id: instructorId })
+      toast.success(res.data?.pending_request ? `Request sent to ${instructorName}.` : `Assigned to ${instructorName}.`)
       fetchEntries()
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to assign.')
@@ -1696,7 +1720,19 @@ export default function FacultyLoad() {
                             return (
                               <tr key={e.id} className="hover:bg-gray-50 transition">
                                 <td className="px-4 py-2.5 font-mono font-semibold text-green-800 text-xs whitespace-nowrap">{e.course_code}</td>
-                                <td className="px-4 py-2.5 text-gray-700 text-xs">{e.descriptive_title}</td>
+                                <td className="px-4 py-2.5 text-gray-700 text-xs">
+                                  {e.descriptive_title}
+                                  {!e.assigned_instructor_id && e.request_status && e.request_status !== 'declined' && (
+                                    <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800" title="Waiting on the other department — see Teaching Requests">
+                                      {e.request_status === 'pending_instructor' ? `Asked ${e.request_instructor}` : `${e.request_instructor} accepted — awaiting their dept`}
+                                    </span>
+                                  )}
+                                  {!e.assigned_instructor_id && e.request_status === 'declined' && (
+                                    <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800" title={e.request_decline_reason || ''}>
+                                      {e.request_declined_stage === 'home' ? `${e.request_instructor}'s dept declined` : `${e.request_instructor} declined`}{e.request_decline_reason ? `: ${e.request_decline_reason}` : ''}
+                                    </span>
+                                  )}
+                                </td>
                                 {/* Inline-editable Section */}
                                 <td className="px-2 py-1.5 text-xs">
                                   {editingSection ? (

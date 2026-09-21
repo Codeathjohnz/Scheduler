@@ -118,6 +118,34 @@ CREATE TABLE IF NOT EXISTS `generated_schedules` (
 ) ENGINE=InnoDB AUTO_INCREMENT=912 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------
+-- Table: cross_dept_requests
+-- A chair asking an instructor from ANOTHER department to teach one of their
+-- subjects. The faculty_load_entries row stays unassigned until the instructor
+-- accepts AND their home chair/dean approves.
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `cross_dept_requests` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `entry_id` int(11) NOT NULL,
+  `instructor_id` int(11) NOT NULL,
+  `requested_by` int(11) NOT NULL,
+  `status` enum('pending_instructor','pending_home','approved','declined','cancelled') NOT NULL DEFAULT 'pending_instructor',
+  `note` varchar(255) DEFAULT NULL,
+  `decline_reason` varchar(255) DEFAULT NULL,
+  `declined_stage` varchar(20) DEFAULT NULL,
+  `home_approver_id` int(11) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `instructor_action_at` timestamp NULL DEFAULT NULL,
+  `home_action_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_entry` (`entry_id`),
+  KEY `idx_instructor` (`instructor_id`,`status`),
+  KEY `idx_requested_by` (`requested_by`),
+  CONSTRAINT `fk_cdr_entry` FOREIGN KEY (`entry_id`) REFERENCES `faculty_load_entries` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_cdr_instructor` FOREIGN KEY (`instructor_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_cdr_requested_by` FOREIGN KEY (`requested_by`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------
 -- Table: instructor_specialties
 -- --------------------------------------------------
 CREATE TABLE IF NOT EXISTS `instructor_specialties` (
@@ -355,6 +383,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `department` varchar(100) DEFAULT NULL,
   `section` varchar(20) DEFAULT NULL,
   `programs` varchar(255) DEFAULT NULL COMMENT 'Comma-separated programs an instructor teaches for, e.g. BSIT,BSIS. NULL/empty = every program in the department.',
+  `cross_dept_open` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1 = willing to be asked to teach for other departments',
   `mobility_level` tinyint(4) DEFAULT 3,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `email` varchar(150) DEFAULT NULL,

@@ -65,6 +65,46 @@ const steps = [
       return true
     },
   },
+  {
+    name: 'users.cross_dept_open (willing to teach for other departments)',
+    async run(pool) {
+      if (await columnInfo(pool, 'users', 'cross_dept_open')) return false
+      await pool.query('ALTER TABLE users ADD COLUMN cross_dept_open TINYINT(1) NOT NULL DEFAULT 0 AFTER programs')
+      return true
+    },
+  },
+  {
+    name: 'cross_dept_requests table (teaching for another department)',
+    async run(pool) {
+      const [[t]] = await pool.query(
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cross_dept_requests'"
+      )
+      if (t) return false
+      await pool.query(`
+        CREATE TABLE cross_dept_requests (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          entry_id INT NOT NULL,
+          instructor_id INT NOT NULL,
+          requested_by INT NOT NULL,
+          status ENUM('pending_instructor','pending_home','approved','declined','cancelled') NOT NULL DEFAULT 'pending_instructor',
+          note VARCHAR(255) NULL,
+          decline_reason VARCHAR(255) NULL,
+          declined_stage VARCHAR(20) NULL,
+          home_approver_id INT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          instructor_action_at TIMESTAMP NULL DEFAULT NULL,
+          home_action_at TIMESTAMP NULL DEFAULT NULL,
+          KEY idx_entry (entry_id),
+          KEY idx_instructor (instructor_id, status),
+          KEY idx_requested_by (requested_by),
+          CONSTRAINT fk_cdr_entry FOREIGN KEY (entry_id) REFERENCES faculty_load_entries (id) ON DELETE CASCADE,
+          CONSTRAINT fk_cdr_instructor FOREIGN KEY (instructor_id) REFERENCES users (id) ON DELETE CASCADE,
+          CONSTRAINT fk_cdr_requested_by FOREIGN KEY (requested_by) REFERENCES users (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+      return true
+    },
+  },
 ]
 
 export async function runMigrations(pool) {

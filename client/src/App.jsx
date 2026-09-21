@@ -52,6 +52,7 @@ import InstructorDashboard from './pages/instructor/Dashboard.jsx'
 import InstructorSchedule from './pages/instructor/Schedule.jsx'
 import InstructorConfirmLoad from './pages/instructor/ConfirmLoad.jsx'
 import InstructorMyLoad from './pages/instructor/MyLoad.jsx'
+import TeachingRequests from './pages/shared/TeachingRequests.jsx'
 import InstructorSpecialty from './pages/instructor/MySpecialty.jsx'
 import InstructorAccessibility from './pages/instructor/AccessibilityRequest.jsx'
 import InstructorLoadRequest from './pages/instructor/LoadRequest.jsx'
@@ -101,6 +102,7 @@ export default function App() {
             <Route path="faculty-load" element={<ChairFacultyLoad />} />
             <Route path="load-requests" element={<ChairLoadRequests />} />
             <Route path="my-load" element={<InstructorMyLoad />} />
+            <Route path="teaching-requests" element={<TeachingRequests />} />
             <Route path="confirm-load" element={<InstructorConfirmLoad />} />
             <Route path="specialty" element={<InstructorSpecialty />} />
             <Route path="accessibility" element={<InstructorAccessibility />} />
@@ -111,6 +113,7 @@ export default function App() {
             <Route index element={<DeanDashboard />} />
             <Route path="review" element={<DeanReview />} />
             <Route path="my-load" element={<InstructorMyLoad />} />
+            <Route path="teaching-requests" element={<TeachingRequests />} />
             <Route path="confirm-load" element={<InstructorConfirmLoad />} />
             <Route path="specialty" element={<InstructorSpecialty />} />
             <Route path="accessibility" element={<InstructorAccessibility />} />
@@ -154,6 +157,7 @@ export default function App() {
             <Route index element={<InstructorDashboard />} />
             <Route path="schedule" element={<InstructorSchedule />} />
             <Route path="my-load" element={<InstructorMyLoad />} />
+            <Route path="teaching-requests" element={<TeachingRequests />} />
             <Route path="confirm-load" element={<InstructorConfirmLoad />} />
             <Route path="specialty" element={<InstructorSpecialty />} />
             <Route path="accessibility" element={<InstructorAccessibility />} />
