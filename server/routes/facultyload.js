@@ -2,6 +2,7 @@ import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { generateFacultyLoadingDocx } from '../utils/facultyLoadingDocx.js'
+import { hasDeptGrant, grantedDepartments } from '../utils/deptAccess.js'
 import { notify } from '../utils/notify.js'
 
 const router = Router()
@@ -120,7 +121,10 @@ async function crossDeptTarget(chairId, actorRole, instructorId) {
 // Message if the request can't be made, otherwise null: the instructor must be
 // open to other departments (or have picked this exact subject as a
 // specialty), and this subject must not push them past the hard unit cap.
-async function crossDeptProblem(inst, subjectId, year, semester, credit) {
+async function crossDeptProblem(inst, subjectId, year, semester, credit, chairId) {
+  if (!(await hasDeptGrant(chairId, inst.department, year, semester))) {
+    return `Ask the Dean of ${inst.department} for access first (Teaching Requests → Ask another college). Once they approve, you can pick ${inst.name}.`
+  }
   const [[spec]] = subjectId
     ? await pool.query('SELECT COUNT(*) AS n FROM instructor_specialties WHERE instructor_id = ? AND subject_id = ?', [inst.id, subjectId])
     : [[{ n: 0 }]]
@@ -342,7 +346,13 @@ router.get('/instructors/:subjectId', authenticate, authorize('chair', 'admin'),
       ORDER BY has_specialty DESC, specialty_priority ASC, u.name ASC
     `, [req.params.subjectId, req.params.subjectId, ...deptParams])
 
-    const result = instructors.map(i => ({
+    // Other colleges' instructors only appear once that college's Dean has
+    // approved this chair's access request for the term.
+    const granted = await grantedDepartments(req.user.id, year, semester)
+    const visible = instructors.filter(i => requiredDept || i.department === me?.department
+      || POOL_DEPARTMENTS.has(i.department) || granted.has(i.department))
+
+    const result = visible.map(i => ({
       ...i,
       current_units: loadMap[i.id] || 0,
       has_specialty: i.has_specialty > 0,
@@ -387,7 +397,7 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
     // Another department's instructor → send a request instead of assigning.
     const cross = await crossDeptTarget(req.user.id, req.user.role, assigned_instructor_id)
     if (cross) {
-      const problem = await crossDeptProblem(cross, subject_id, academic_year, semester, unitCredit(subject.lec_hours, subject.lab_hours))
+      const problem = await crossDeptProblem(cross, subject_id, academic_year, semester, unitCredit(subject.lec_hours, subject.lab_hours), req.user.id)
       if (problem) return res.status(400).json({ message: problem })
     }
     const [r] = await pool.query(`
@@ -432,7 +442,7 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
           const [[sub]] = await pool.query('SELECT lec_hours, lab_hours FROM prospectus_subjects WHERE id = ?', [subject_id])
           if (sub) { credit = unitCredit(sub.lec_hours, sub.lab_hours); subjId = subject_id }
         }
-        const problem = await crossDeptProblem(cross, subjId, before.academic_year, before.semester, credit)
+        const problem = await crossDeptProblem(cross, subjId, before.academic_year, before.semester, credit, req.user.id)
         if (problem) return res.status(400).json({ message: problem })
       }
     }

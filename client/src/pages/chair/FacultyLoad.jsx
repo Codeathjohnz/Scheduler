@@ -659,7 +659,7 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
                 </optgroup>
               )}
               {crossDept.length > 0 && (
-                <optgroup label="🤝 Other departments — they must agree first">
+                <optgroup label="🤝 Other colleges (Dean approved) — they must accept">
                   {crossDept.map(i => (
                     <option key={i.id} value={i.id}>
                       {i.name} [{i.department}]{roleTag(i)}{i.specialty_summary ? ` · ${i.specialty_summary}` : ''} — {i.current_units} units loaded
@@ -680,13 +680,18 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
             {crossDept.some(i => String(i.id) === String(form.assigned_instructor_id)) && (
               <div className="mt-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 space-y-2">
                 <p className="text-xs text-blue-800">
-                  This instructor belongs to another department. Saving sends them a <strong>request</strong> — the subject stays unassigned
-                  and doesn't count toward their load until they accept and their own department approves.
+                  This instructor belongs to another college, whose Dean has approved your request. Saving sends them a <strong>request</strong> —
+                  the subject stays unassigned and doesn't count toward their load until they accept.
                 </p>
                 <input value={form.request_note} onChange={e=>setForm(f=>({...f,request_note:e.target.value}))} maxLength={255}
                   placeholder="Why this instructor? e.g. digital innovation in agriculture — 3 units, Mon/Wed"
                   className="w-full border-2 border-blue-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-blue-500 bg-white" />
               </div>
+            )}
+            {crossDept.length === 0 && (
+              <p className="text-xs text-gray-500 mt-1">
+                Need an instructor from another college? Ask that college's Dean first under <a href="/chair/teaching-requests" className="text-green-700 font-semibold underline">Teaching Requests</a>.
+              </p>
             )}
             {specialists.length > 0 && (
               <p className="text-xs text-green-600 mt-1">

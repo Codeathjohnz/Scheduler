@@ -75,6 +75,13 @@ export const crossDeptAPI = {
   sent:    ()               => api.get('/cross-dept/sent'),
   cancel:  (id)             => api.delete(`/cross-dept/${id}`),
   counts:  ()               => api.get('/cross-dept/counts'),
+  // Step 1: ask the other college's Dean for access to their instructors
+  accessDepartments: (year, semester) => api.get(`/cross-dept/access/departments?year=${year}&semester=${semester}`),
+  accessRequest:  (data)           => api.post('/cross-dept/access', data),
+  accessSent:     ()               => api.get('/cross-dept/access/sent'),
+  accessIncoming: ()               => api.get('/cross-dept/access/incoming'),
+  accessAct:      (id, action, reason) => api.patch(`/cross-dept/access/${id}`, { action, reason }),
+  accessCancel:   (id)             => api.delete(`/cross-dept/access/${id}`),
 }
 
 export const placeholdersAPI = {
