@@ -9,7 +9,7 @@ const router = Router()
 router.get('/', authenticate, authorize('admin'), async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT id, username, name, role, department, section, programs, email, mobility_level, created_at FROM users ORDER BY role, name'
+      'SELECT id, username, name, role, department, section, programs, cross_dept_open, email, mobility_level, created_at FROM users ORDER BY role, name'
     )
     res.json(rows)
   } catch (err) {
@@ -61,6 +61,17 @@ router.put('/me/programs', authenticate, authorize('instructor', 'chair', 'dean'
   try {
     await pool.query('UPDATE users SET programs = ? WHERE id = ?', [cleanPrograms(req.body.programs), req.user.id])
     res.json({ message: 'Programs saved.' })
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.', error: err.message })
+  }
+})
+
+// PUT /api/users/me/cross-dept — say whether other departments' chairs may ask
+// you to teach one of their subjects. body: { open: true|false }
+router.put('/me/cross-dept', authenticate, authorize('instructor', 'chair', 'dean'), async (req, res) => {
+  try {
+    await pool.query('UPDATE users SET cross_dept_open = ? WHERE id = ?', [req.body.open ? 1 : 0, req.user.id])
+    res.json({ message: 'Saved.' })
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
   }
@@ -123,7 +134,7 @@ router.get('/:id', authenticate, async (req, res) => {
   }
   try {
     const [[user]] = await pool.query(
-      'SELECT id, username, name, role, department, section, programs, email, mobility_level, created_at FROM users WHERE id = ?',
+      'SELECT id, username, name, role, department, section, programs, cross_dept_open, email, mobility_level, created_at FROM users WHERE id = ?',
       [req.params.id]
     )
     if (!user) return res.status(404).json({ message: 'User not found.' })

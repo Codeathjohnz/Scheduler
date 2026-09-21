@@ -20,6 +20,7 @@ import schedulingRoutes from './routes/scheduling.js'
 import adminRoutes from './routes/admin.js'
 import buildingPriorityRoutes from './routes/buildingPriorities.js'
 import loadRequestRoutes from './routes/loadRequests.js'
+import crossDeptRoutes from './routes/crossDept.js'
 import pool from './config/db.js'
 import { runMigrations } from './utils/migrate.js'
 
@@ -46,6 +47,7 @@ app.use('/api/scheduling', schedulingRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/building-priorities', buildingPriorityRoutes)
 app.use('/api/load-requests', loadRequestRoutes)
+app.use('/api/cross-dept', crossDeptRoutes)
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', system: 'ADSSU Room Scheduling API' }))
 

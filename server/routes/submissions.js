@@ -65,6 +65,22 @@ router.post('/from-faculty-load', authenticate, authorize('chair'), async (req, 
       conn.release()
       return res.status(400).json({ message: 'No faculty load entries found. Add entries in the Faculty Loading Sheet first.' })
     }
+    // Requests to instructors from other departments must be settled first:
+    // an answer arriving after submission wouldn't go through the confirmation
+    // chain the rest of the load is going through.
+    const [[open]] = await conn.query(
+      `SELECT COUNT(*) AS n FROM cross_dept_requests r
+       JOIN faculty_load_entries e ON e.id = r.entry_id
+       WHERE e.chair_id = ? AND e.academic_year = ? AND e.semester = ? AND r.status IN ('pending_instructor', 'pending_home')`,
+      [req.user.id, academic_year, semester]
+    )
+    if (open.n > 0) {
+      conn.release()
+      return res.status(400).json({
+        message: `You still have ${open.n} teaching request${open.n > 1 ? 's' : ''} waiting on other departments. Wait for the answer (or withdraw it under Teaching Requests) before submitting.`,
+      })
+    }
+
     const instructorIds = [...new Set(entries.map(e => e.assigned_instructor_id).filter(Boolean))]
     if (instructorIds.length === 0) {
       conn.release()

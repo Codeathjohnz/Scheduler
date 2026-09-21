@@ -79,6 +79,47 @@ function MyPrograms() {
   )
 }
 
+// Whether chairs from OTHER departments may ask this person to teach one of
+// their subjects (e.g. an IT instructor helping Agriculture's digital-innovation
+// course). Off by default. Turning it on only makes them askable — every request
+// still needs their own accept and their home department's approval.
+function OpenToOtherDepartments() {
+  const { user } = useAuth()
+  const [open, setOpen] = useState(false)
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    usersAPI.getOne(user.id).then(r => setOpen(!!r.data.cross_dept_open)).catch(() => {}).finally(() => setReady(true))
+  }, [user.id])
+
+  const toggle = async () => {
+    const next = !open
+    setOpen(next)
+    try {
+      await usersAPI.setMyCrossDept(next)
+      toast.success(next ? 'Other departments can now ask you to teach.' : 'Other departments can no longer ask you.')
+    } catch (err) {
+      setOpen(!next)
+      toast.error(err.response?.data?.message || 'Failed to save.')
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 mb-5">
+      <label className={`flex items-start gap-3 ${ready ? 'cursor-pointer' : 'opacity-60'}`}>
+        <input type="checkbox" checked={open} disabled={!ready} onChange={toggle} className="accent-green-700 w-4 h-4 mt-1 shrink-0" />
+        <div>
+          <p className="font-bold text-gray-800 text-sm">I'm open to teaching for other departments</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Chairs from other colleges (e.g. Agriculture needing help with digital innovation) will be able to <em>ask</em> you to teach a subject that matches your specialties.
+            Nothing is assigned on its own: you can accept or decline each request, and your own department's chair or dean has to approve it before it's added to your load.
+          </p>
+        </div>
+      </label>
+    </div>
+  )
+}
+
 export default function MySpecialty() {
   const [subjects, setSubjects]   = useState([])
   const [groups, setGroups]       = useState([])
@@ -166,6 +207,7 @@ export default function MySpecialty() {
       <div>
         <PageHeader title="My Teaching Specialty" subtitle="Select the subjects you are qualified to teach." />
         <MyPrograms />
+        <OpenToOtherDepartments />
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center py-20 text-gray-400">
           <BookOpen className="w-12 h-12 mb-3 opacity-30" />
           <p className="font-semibold text-gray-500">No prospectus has been uploaded yet.</p>
@@ -191,6 +233,7 @@ export default function MySpecialty() {
       />
 
       <MyPrograms />
+      <OpenToOtherDepartments />
 
       {/* Semester filter */}
       {availableSemesters.length > 1 && (

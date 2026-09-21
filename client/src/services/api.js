@@ -29,6 +29,7 @@ export const usersAPI = {
   getOne:  (id)         => api.get(`/users/${id}`),
   getProgramOptions: (department) => api.get(`/users/program-options?department=${encodeURIComponent(department || '')}`),
   setMyPrograms:     (programs)   => api.put('/users/me/programs', { programs }),
+  setMyCrossDept:    (open)       => api.put('/users/me/cross-dept', { open }),
   create:  (data)       => api.post('/users', data),
   update:  (id, data)   => api.put(`/users/${id}`, data),
   remove:  (id)         => api.delete(`/users/${id}`),
@@ -63,6 +64,17 @@ export const submissionsAPI = {
   // Quality Assurance
   getForQA:              ()             => api.get('/submissions/qa'),
   qaAction:              (id, action)   => api.patch(`/submissions/${id}/qa`, { action }),
+}
+
+// Asking an instructor from another department to teach — see server/routes/crossDept.js
+export const crossDeptAPI = {
+  mine:    ()               => api.get('/cross-dept/mine'),
+  respond: (id, action, reason) => api.patch(`/cross-dept/${id}/respond`, { action, reason }),
+  home:    ()               => api.get('/cross-dept/home'),
+  homeAct: (id, action, reason) => api.patch(`/cross-dept/${id}/home`, { action, reason }),
+  sent:    ()               => api.get('/cross-dept/sent'),
+  cancel:  (id)             => api.delete(`/cross-dept/${id}`),
+  counts:  ()               => api.get('/cross-dept/counts'),
 }
 
 export const roomsAPI = {
