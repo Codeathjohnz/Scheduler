@@ -2,6 +2,7 @@ import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { getCombinedLoadMap, MAX_UNITS, TARGET_UNITS, syncConfirmation } from './facultyload.js'
+import { notify } from '../utils/notify.js'
 
 /**
  * Teaching for another department.
@@ -62,6 +63,14 @@ function homeApproverRoles(instructorRole) {
   return ['chair', 'dean']
 }
 
+async function homeApproverIds(r) {
+  const roles = homeApproverRoles(r.instructor_role)
+  if (!roles.length) return []
+  const [rows] = await pool.query('SELECT id FROM users WHERE department = ? AND id <> ? AND role IN (?)', [r.instructor_dept, r.instructor_id, roles])
+  return rows.map(x => x.id)
+}
+const label = (r) => `${r.course_code} ${r.program_yr_sec}`
+
 async function homeApproverExists(r) {
   const roles = homeApproverRoles(r.instructor_role)
   if (!roles.length) return false
@@ -90,6 +99,8 @@ async function finalize(r, homeApproverId) {
     [homeApproverId || null, r.id]
   )
   await syncConfirmation(r.entry_chair_id, r.academic_year, r.semester, r.instructor_id)
+  await notify([r.requested_by], { type: 'teaching_request_result', link: '/chair/faculty-load', title: `${r.instructor_name} will teach ${label(r)}`, body: 'Approved by both sides — it is now assigned and counts toward their load.' })
+  await notify([r.instructor_id], { type: 'teaching_request_result', link: `/${r.instructor_role}/my-load`, title: `${label(r)} for ${r.chair_dept} is now part of your load`, body: 'Approved by your department. It appears under My Faculty Load.' })
   return null
 }
 
@@ -121,6 +132,7 @@ router.patch('/:id/respond', authenticate, authorize('instructor', 'chair', 'dea
         "UPDATE cross_dept_requests SET status = 'declined', declined_stage = 'instructor', decline_reason = ?, instructor_action_at = NOW() WHERE id = ?",
         [reason ? String(reason).slice(0, 255) : null, r.id]
       )
+      await notify([r.requested_by], { type: 'teaching_request_result', flag: 'attention', link: '/chair/teaching-requests', title: `${r.instructor_name} declined ${label(r)}`, body: reason ? String(reason).slice(0, 255) : 'No reason given. Pick another instructor from Faculty Load.' })
       return res.json({ message: 'Declined. The requesting chair has been notified on their page.' })
     }
 
@@ -132,6 +144,12 @@ router.patch('/:id/respond', authenticate, authorize('instructor', 'chair', 'dea
 
     if (await homeApproverExists(r)) {
       await pool.query("UPDATE cross_dept_requests SET status = 'pending_home', instructor_action_at = NOW() WHERE id = ?", [r.id])
+      const dashBase = (role) => `/${role}/teaching-requests`
+      const approvers = await pool.query('SELECT id, role FROM users WHERE id IN (?)', [await homeApproverIds(r)]).then(([rows]) => rows).catch(() => [])
+      for (const a of approvers) {
+        await notify([a.id], { type: 'teaching_request_approval', link: dashBase(a.role), title: `${r.instructor_name} accepted to teach ${label(r)} for ${r.chair_dept}`, body: 'It needs your department\'s approval before it counts toward their load.' })
+      }
+      await notify([r.requested_by], { type: 'teaching_request_result', link: '/chair/teaching-requests', title: `${r.instructor_name} accepted ${label(r)}`, body: `Now waiting for ${r.instructor_dept} to approve.` })
       return res.json({ message: `Accepted. It now goes to your department (${r.instructor_dept}) for approval before it's added to your load.` })
     }
     // Nobody in the home department could sign off, so the instructor's own yes is enough.
@@ -181,6 +199,8 @@ router.patch('/:id/home', authenticate, authorize('chair', 'dean'), async (req, 
         "UPDATE cross_dept_requests SET status = 'declined', declined_stage = 'home', decline_reason = ?, home_approver_id = ?, home_action_at = NOW() WHERE id = ?",
         [reason ? String(reason).slice(0, 255) : null, req.user.id, r.id]
       )
+      await notify([r.requested_by], { type: 'teaching_request_result', flag: 'attention', link: '/chair/teaching-requests', title: `${r.instructor_dept} declined ${r.instructor_name} for ${label(r)}`, body: reason ? String(reason).slice(0, 255) : 'No reason given. Pick another instructor from Faculty Load.' })
+      await notify([r.instructor_id], { type: 'teaching_request_result', link: `/${r.instructor_role}/teaching-requests`, title: `Your department declined ${label(r)} for ${r.chair_dept}`, body: reason ? String(reason).slice(0, 255) : null })
       return res.json({ message: 'Declined.' })
     }
     const err = await finalize(r, req.user.id)

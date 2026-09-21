@@ -77,6 +77,21 @@ export const crossDeptAPI = {
   counts:  ()               => api.get('/cross-dept/counts'),
 }
 
+export const placeholdersAPI = {
+  fill:    (academic_year, semester) => api.post('/placeholders/fill', { academic_year, semester }),
+  list:    (year, sem)               => api.get(`/placeholders?year=${year}&semester=${sem}`),
+  replace: (id, data)                => api.post(`/placeholders/${id}/replace`, data),
+  changes: ()                        => api.get('/placeholders/changes'),
+  respond: (changeId, action)        => api.patch(`/placeholders/changes/${changeId}/respond`, { action }),
+}
+
+export const notificationsAPI = {
+  list:        ()   => api.get('/notifications'),
+  unreadCount: ()   => api.get('/notifications/unread-count'),
+  read:        (id) => api.patch(`/notifications/${id}/read`),
+  readAll:     ()   => api.post('/notifications/read-all'),
+}
+
 export const roomsAPI = {
   getAll:          ()     => api.get('/rooms'),
   getAvailability: ()     => api.get('/rooms/availability'),

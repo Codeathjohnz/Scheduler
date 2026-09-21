@@ -4,6 +4,7 @@ import StatCard from '../../components/ui/StatCard.jsx'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
 import { schedulingAPI } from '../../services/api.js'
+import NotificationBox from '../../components/common/NotificationBox.jsx'
 
 const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 
@@ -40,6 +41,7 @@ export default function StudentDashboard() {
         title={`Welcome, ${user?.name}`}
         subtitle={`Student · ${user?.department} – View your class schedule and room assignments.`}
       />
+      <NotificationBox />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard label="Enrolled Subjects"  value={loading ? '—' : uniqueSubjects.length} icon={BookOpen}     color="green" />
         <StatCard label="Classes Today"      value={loading ? '—' : todayClasses.length}   icon={Clock}        color="gold" />

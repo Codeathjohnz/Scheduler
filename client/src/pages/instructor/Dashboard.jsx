@@ -4,6 +4,7 @@ import StatCard from '../../components/ui/StatCard.jsx'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
 import { schedulingAPI } from '../../services/api.js'
+import NotificationBox from '../../components/common/NotificationBox.jsx'
 
 const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 
@@ -41,6 +42,7 @@ export default function InstructorDashboard() {
         title={`Welcome, ${user?.name}`}
         subtitle="Instructor – View your teaching schedule and manage accessibility preferences."
       />
+      <NotificationBox />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard label="Subjects Assigned"   value={loading ? '—' : uniqueSubjects.length} icon={BookOpen}    color="green" />

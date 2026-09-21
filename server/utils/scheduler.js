@@ -374,6 +374,9 @@ export function buildSessions(entries, rooms, mobilityMap, buildingPriorities) {
         mobilityLevel:  mobility,
         department,
         program,
+        // Placeholder instructors ("Instructor A") stand in for people who don't
+        // exist yet — real instructors' sessions are placed first (see generateSchedule).
+        isPlaceholder:  !!entry.is_placeholder,
         deptRank:       bestDeptRank(department, roomType),
       })
     }
@@ -383,7 +386,15 @@ export function buildSessions(entries, rooms, mobilityMap, buildingPriorities) {
 
 // ── main scheduling function (greedy constructive heuristic) ─────────────────
 
-export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPriorities = {}) {
+/**
+ * @param {object[]} [fixed] - already-placed sessions (same shape as the
+ *   `scheduled` items this returns) to schedule AROUND without moving: they
+ *   block rooms/instructors/sections exactly like sessions placed earlier in
+ *   this run, but are not part of the returned result. Used to re-slot just a
+ *   few sessions (e.g. a subject whose instructor changed) without disturbing
+ *   the rest of an already-approved schedule.
+ */
+export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPriorities = {}, fixed = []) {
   const sessions = buildSessions(entries, rooms, mobilityMap, buildingPriorities)
 
   // Most Constrained Variable ordering
@@ -392,6 +403,10 @@ export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPrior
     const aMob = a.mobilityLevel === 1 ? 0 : 1
     const bMob = b.mobilityLevel === 1 ? 0 : 1
     if (aMob !== bMob) return aMob - bMob
+    // Real instructors get first pick of rooms and times; sessions held by a
+    // placeholder ("Instructor A") are fitted in around them afterwards, so a
+    // stand-in never takes a slot a real person needs.
+    if (a.isPlaceholder !== b.isPlaceholder) return a.isPlaceholder ? 1 : -1
     // Rank-1 reserved programs get first pick of their buildings before rank 2, 3, ...
     const aRank = a.deptRank ?? Infinity
     const bRank = b.deptRank ?? Infinity
@@ -405,7 +420,7 @@ export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPrior
     return bMax - aMax
   })
 
-  const scheduled   = []
+  const scheduled   = fixed.map(f => ({ ...f, _fixed: true }))
   const unscheduled = []
 
   for (const session of sessions) {
@@ -521,7 +536,7 @@ export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPrior
     }
   }
 
-  return { scheduled, unscheduled }
+  return { scheduled: scheduled.filter(s => !s._fixed), unscheduled }
 }
 
 // ── genetic algorithm engine ──────────────────────────────────────────────────

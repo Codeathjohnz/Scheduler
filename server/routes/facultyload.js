@@ -2,6 +2,7 @@ import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { generateFacultyLoadingDocx } from '../utils/facultyLoadingDocx.js'
+import { notify } from '../utils/notify.js'
 
 const router = Router()
 
@@ -12,6 +13,9 @@ const router = Router()
 // finishes or gets returned and resubmitted from scratch.
 export async function syncConfirmation(chairId, academicYear, semester, instructorId) {
   if (!instructorId) return
+  // A placeholder can't confirm anything (see submissions.js) — never queue one.
+  const [[who]] = await pool.query('SELECT is_placeholder FROM users WHERE id = ?', [instructorId])
+  if (who?.is_placeholder) return
   const [[sub]] = await pool.query(
     `SELECT id FROM submissions WHERE chair_id = ? AND academic_year = ? AND semester = ? AND status = 'pending_instructor'`,
     [chairId, academicYear, semester]
@@ -143,6 +147,18 @@ async function createCrossDeptRequest(entryId, instructorId, chairId, note) {
     'INSERT INTO cross_dept_requests (entry_id, instructor_id, requested_by, note) VALUES (?, ?, ?, ?)',
     [entryId, instructorId, chairId, note ? String(note).slice(0, 255) : null]
   )
+  const [[info]] = await pool.query(
+    `SELECT e.course_code, e.program_yr_sec, c.name AS chair_name, c.department AS chair_dept, i.role AS instructor_role
+     FROM faculty_load_entries e JOIN users c ON c.id = ? JOIN users i ON i.id = ? WHERE e.id = ?`,
+    [chairId, instructorId, entryId]
+  )
+  if (info) {
+    await notify([instructorId], {
+      type: 'teaching_request', refId: entryId, link: `/${info.instructor_role}/teaching-requests`,
+      title: `${info.chair_name} (${info.chair_dept}) asked you to teach ${info.course_code} ${info.program_yr_sec}`,
+      body: note ? String(note).slice(0, 255) : 'Open Teaching Requests to accept or decline.',
+    })
+  }
 }
 
 // GET /api/faculty-load/section-counts?year=&semester=  — { [year_level]: section_count }
@@ -193,6 +209,7 @@ router.get('/', authenticate, authorize('chair', 'admin'), async (req, res) => {
       SELECT fle.*,
         u.name AS instructor_name,
         u.department AS instructor_dept,
+        u.is_placeholder AS instructor_is_placeholder,
         ps.prerequisite,
         (SELECT r.status FROM cross_dept_requests r WHERE r.entry_id = fle.id AND r.status IN ('pending_instructor','pending_home','declined') ORDER BY r.id DESC LIMIT 1) AS request_status,
         (SELECT ri.name FROM cross_dept_requests r JOIN users ri ON ri.id = r.instructor_id WHERE r.entry_id = fle.id AND r.status IN ('pending_instructor','pending_home','declined') ORDER BY r.id DESC LIMIT 1) AS request_instructor,
@@ -321,7 +338,7 @@ router.get('/instructors/:subjectId', authenticate, authorize('chair', 'admin'),
         (u.department = 'PATHFIT') AS is_pathfit,
         (u.department = 'NSTP') AS is_nstp
       FROM users u
-      WHERE u.role IN ('instructor', 'chair', 'dean') AND ${deptCondition}
+      WHERE u.role IN ('instructor', 'chair', 'dean') AND u.is_placeholder = 0 AND ${deptCondition}
       ORDER BY has_specialty DESC, specialty_priority ASC, u.name ASC
     `, [req.params.subjectId, req.params.subjectId, ...deptParams])
 
@@ -346,7 +363,7 @@ router.get('/instructors-all', authenticate, authorize('chair', 'admin'), async 
     const loadMap = await getCombinedLoadMap(year, semester)
 
     const [instructors] = await pool.query(
-      "SELECT id, name, department, role, (department = 'General Education') AS is_ge, (department = 'PATHFIT') AS is_pathfit, (department = 'NSTP') AS is_nstp FROM users WHERE role IN ('instructor', 'chair', 'dean') ORDER BY department, name"
+      "SELECT id, name, department, role, (department = 'General Education') AS is_ge, (department = 'PATHFIT') AS is_pathfit, (department = 'NSTP') AS is_nstp FROM users WHERE role IN ('instructor', 'chair', 'dean') AND is_placeholder = 0 ORDER BY department, name"
     )
     res.json(instructors.map(i => ({ ...i, current_units: loadMap[i.id] || 0 })))
   } catch (err) {
@@ -585,7 +602,7 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
         GROUP_CONCAT(CONCAT(isp.subject_id, ':', isp.priority)) AS specialty_ids
       FROM users u
       LEFT JOIN instructor_specialties isp ON isp.instructor_id = u.id
-      WHERE u.role IN ('instructor', 'chair', 'dean') ${deptFilter}
+      WHERE u.role IN ('instructor', 'chair', 'dean') AND u.is_placeholder = 0 ${deptFilter}
       GROUP BY u.id
       ORDER BY u.name
     `, deptParam)

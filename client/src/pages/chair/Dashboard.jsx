@@ -4,6 +4,7 @@ import StatCard from '../../components/ui/StatCard.jsx'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
 import { submissionsAPI } from '../../services/api.js'
+import NotificationBox from '../../components/common/NotificationBox.jsx'
 
 const STATUS_LABEL = {
   pending_vpaa:  'Pending VPAA Review',
@@ -35,6 +36,7 @@ export default function ChairDashboard() {
         title={`Welcome, ${user?.name}`}
         subtitle="Program Chair – Manage and submit scheduling data for your department."
       />
+      <NotificationBox />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard label="Instructors" value="12" icon={Users} color="green" />
         <StatCard label="Subjects" value="28" icon={BookOpen} color="teal" />

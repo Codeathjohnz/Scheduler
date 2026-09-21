@@ -116,15 +116,29 @@ router.post('/from-faculty-load', authenticate, authorize('chair'), async (req, 
     )
     const submissionId = result.insertId
 
-    const confirmRows = instructorIds.map(id => [submissionId, id])
-    await conn.query(
-      'INSERT INTO submission_confirmations (submission_id, instructor_id) VALUES ?',
-      [confirmRows]
+    // Placeholder instructors ("Instructor A") are stand-ins for people who
+    // don't exist yet — they can't confirm anything, so only real instructors
+    // get a confirmation row. If EVERY assigned instructor is a placeholder
+    // there's nobody to wait on, so it goes straight to the Dean.
+    const [realRows] = await conn.query(
+      `SELECT id FROM users WHERE id IN (${instructorIds.map(() => '?').join(',')}) AND is_placeholder = 0`,
+      instructorIds
     )
+    const realIds = realRows.map(r => r.id)
+    if (realIds.length) {
+      await conn.query(
+        'INSERT INTO submission_confirmations (submission_id, instructor_id) VALUES ?',
+        [realIds.map(id => [submissionId, id])]
+      )
+    } else {
+      await conn.query("UPDATE submissions SET status = 'pending_dean' WHERE id = ?", [submissionId])
+    }
 
     await conn.commit()
     res.status(201).json({
-      message: `Faculty load submitted. Waiting on ${instructorIds.length} instructor${instructorIds.length > 1 ? 's' : ''} to confirm.`,
+      message: realIds.length
+        ? `Faculty load submitted. Waiting on ${realIds.length} instructor${realIds.length > 1 ? 's' : ''} to confirm.`
+        : 'Faculty load submitted. Every subject is on a placeholder instructor, so it went straight to the Dean.',
       id: submissionId,
     })
   } catch (err) {

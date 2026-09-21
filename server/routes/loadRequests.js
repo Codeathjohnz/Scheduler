@@ -80,7 +80,7 @@ router.get('/', authenticate, authorize('chair'), async (req, res) => {
       SELECT lr.*, u.name AS instructor_name, u.department AS instructor_dept
       FROM load_requests lr
       JOIN users u ON lr.instructor_id = u.id
-      WHERE u.role = 'instructor' ${deptFilter}
+      WHERE u.role = 'instructor' AND u.is_placeholder = 0 ${deptFilter}
       ORDER BY FIELD(lr.status, 'pending', 'approved', 'rejected'), lr.created_at DESC
     `, params)
     res.json(rows)

@@ -8,6 +8,7 @@ import {
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
 import api from '../../services/api.js'
+import NotificationBox from '../../components/common/NotificationBox.jsx'
 
 const TYPE_STYLE = {
   submission:   'bg-blue-50 border-blue-100 text-blue-800',
@@ -87,6 +88,7 @@ export default function AdminDashboard() {
           </button>
         }
       />
+      <NotificationBox />
 
       {/* Term selector */}
       <div className="flex items-center gap-3 mb-5">

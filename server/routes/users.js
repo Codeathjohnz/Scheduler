@@ -9,7 +9,7 @@ const router = Router()
 router.get('/', authenticate, authorize('admin'), async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT id, username, name, role, department, section, programs, cross_dept_open, email, mobility_level, created_at FROM users ORDER BY role, name'
+      'SELECT id, username, name, role, department, section, programs, cross_dept_open, email, mobility_level, created_at FROM users WHERE is_placeholder = 0 ORDER BY role, name'
     )
     res.json(rows)
   } catch (err) {

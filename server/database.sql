@@ -146,6 +146,48 @@ CREATE TABLE IF NOT EXISTS `cross_dept_requests` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------
+-- Table: notifications  (dashboard notification box)
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `notifications` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `type` varchar(40) NOT NULL,
+  `title` varchar(160) NOT NULL,
+  `body` text DEFAULT NULL,
+  `link` varchar(200) DEFAULT NULL,
+  `ref_id` int(11) DEFAULT NULL,
+  `flag` varchar(20) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `read_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_user` (`user_id`,`read_at`,`created_at`),
+  CONSTRAINT `fk_notif_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------
+-- Table: load_changes  (log of placeholder -> real instructor swaps)
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS `load_changes` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `chair_id` int(11) NOT NULL,
+  `placeholder_id` int(11) NOT NULL,
+  `instructor_id` int(11) NOT NULL,
+  `academic_year` varchar(20) NOT NULL,
+  `semester` tinyint(4) NOT NULL,
+  `entry_ids` text NOT NULL,
+  `reason` varchar(255) DEFAULT NULL,
+  `is_exception` tinyint(1) NOT NULL DEFAULT 0,
+  `status` enum('pending','confirmed','declined') NOT NULL DEFAULT 'pending',
+  `rescheduled` int(11) NOT NULL DEFAULT 0,
+  `unresolved` int(11) NOT NULL DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `confirmed_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_chair` (`chair_id`),
+  KEY `idx_instructor` (`instructor_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------
 -- Table: instructor_specialties
 -- --------------------------------------------------
 CREATE TABLE IF NOT EXISTS `instructor_specialties` (
@@ -384,6 +426,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   `section` varchar(20) DEFAULT NULL,
   `programs` varchar(255) DEFAULT NULL COMMENT 'Comma-separated programs an instructor teaches for, e.g. BSIT,BSIS. NULL/empty = every program in the department.',
   `cross_dept_open` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1 = willing to be asked to teach for other departments',
+  `is_placeholder` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1 = stand-in "Instructor A/B/C" holding subjects until a real instructor is found',
+  `placeholder_owner` int(11) DEFAULT NULL COMMENT 'chair who created this placeholder',
   `mobility_level` tinyint(4) DEFAULT 3,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `email` varchar(150) DEFAULT NULL,
