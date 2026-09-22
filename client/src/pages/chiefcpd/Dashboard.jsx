@@ -4,6 +4,7 @@ import StatCard from '../../components/ui/StatCard.jsx'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
 import { submissionsAPI } from '../../services/api.js'
+import NotificationBox from '../../components/common/NotificationBox.jsx'
 
 const STATUS_LABEL = {
   pending_dean:      'With Dean',
@@ -47,6 +48,7 @@ export default function ChiefCPDDashboard() {
         title={`Welcome, ${user?.name}`}
         subtitle="Chief Curriculum Planning and Development – Review faculty load submissions confirmed by the Dean before they reach Quality Assurance."
       />
+      <NotificationBox />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard label="Pending Review"    value={String(pending.length)}     icon={Clock}         color="gold" />

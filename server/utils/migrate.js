@@ -105,6 +105,99 @@ const steps = [
       return true
     },
   },
+  {
+    name: 'users.is_placeholder / placeholder_owner (stand-in instructors)',
+    async run(pool) {
+      if (await columnInfo(pool, 'users', 'is_placeholder')) return false
+      await pool.query('ALTER TABLE users ADD COLUMN is_placeholder TINYINT(1) NOT NULL DEFAULT 0 AFTER cross_dept_open')
+      await pool.query('ALTER TABLE users ADD COLUMN placeholder_owner INT NULL DEFAULT NULL AFTER is_placeholder')
+      return true
+    },
+  },
+  {
+    name: 'notifications table (dashboard notification box)',
+    async run(pool) {
+      const [[t]] = await pool.query(
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notifications'"
+      )
+      if (t) return false
+      await pool.query(`
+        CREATE TABLE notifications (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT NOT NULL,
+          type VARCHAR(40) NOT NULL,
+          title VARCHAR(160) NOT NULL,
+          body TEXT NULL,
+          link VARCHAR(200) NULL,
+          ref_id INT NULL,
+          flag VARCHAR(20) NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          read_at TIMESTAMP NULL DEFAULT NULL,
+          KEY idx_user (user_id, read_at, created_at),
+          CONSTRAINT fk_notif_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+      return true
+    },
+  },
+  {
+    name: 'load_changes table (log of placeholder -> real instructor swaps)',
+    async run(pool) {
+      const [[t]] = await pool.query(
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'load_changes'"
+      )
+      if (t) return false
+      await pool.query(`
+        CREATE TABLE load_changes (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          chair_id INT NOT NULL,
+          placeholder_id INT NOT NULL,
+          instructor_id INT NOT NULL,
+          academic_year VARCHAR(20) NOT NULL,
+          semester TINYINT NOT NULL,
+          entry_ids TEXT NOT NULL,
+          reason VARCHAR(255) NULL,
+          is_exception TINYINT(1) NOT NULL DEFAULT 0,
+          status ENUM('pending','confirmed','declined') NOT NULL DEFAULT 'pending',
+          rescheduled INT NOT NULL DEFAULT 0,
+          unresolved INT NOT NULL DEFAULT 0,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          confirmed_at TIMESTAMP NULL DEFAULT NULL,
+          KEY idx_chair (chair_id),
+          KEY idx_instructor (instructor_id, status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+      return true
+    },
+  },
+  {
+    name: 'dept_access_requests table (chair asks another department dean for instructor access)',
+    async run(pool) {
+      const [[t]] = await pool.query(
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'dept_access_requests'"
+      )
+      if (t) return false
+      await pool.query(`
+        CREATE TABLE dept_access_requests (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          requester_id INT NOT NULL,
+          target_department VARCHAR(150) NOT NULL,
+          academic_year VARCHAR(20) NOT NULL,
+          semester TINYINT NOT NULL,
+          note VARCHAR(255) NULL,
+          status ENUM('pending','approved','declined','cancelled') NOT NULL DEFAULT 'pending',
+          decided_by INT NULL,
+          decline_reason VARCHAR(255) NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          decided_at TIMESTAMP NULL DEFAULT NULL,
+          KEY idx_requester (requester_id, status),
+          KEY idx_target (target_department, status),
+          CONSTRAINT fk_dar_requester FOREIGN KEY (requester_id) REFERENCES users (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+      return true
+    },
+  },
 ]
 
 export async function runMigrations(pool) {

@@ -10,7 +10,8 @@ router.post('/login', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM users WHERE username = ?', [username])
     const user = rows[0]
-    if (!user) return res.status(401).json({ message: 'Invalid credentials.' })
+    // Placeholders ("Instructor A") aren't people and have no usable password.
+    if (!user || user.is_placeholder) return res.status(401).json({ message: 'Invalid credentials.' })
 
     const valid = await bcrypt.compare(password, user.password_hash)
     if (!valid) return res.status(401).json({ message: 'Invalid credentials.' })

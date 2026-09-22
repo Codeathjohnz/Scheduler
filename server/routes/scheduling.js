@@ -55,7 +55,7 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
     const validatedChairIds = validatedSubs.map(s => s.chair_id)
 
     const [entries] = await pool.query(`
-      SELECT fle.*, u.name AS instructor_name, chair.department AS dept, p.program AS program
+      SELECT fle.*, u.name AS instructor_name, u.is_placeholder AS is_placeholder, chair.department AS dept, p.program AS program
       FROM faculty_load_entries fle
       LEFT JOIN users u ON fle.assigned_instructor_id = u.id
       LEFT JOIN users chair ON fle.chair_id = chair.id
@@ -185,6 +185,17 @@ router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
       JOIN faculty_load_entries fle ON gs.faculty_entry_id = fle.id
       WHERE gs.id = ?
     `, [req.params.id])
+
+    // Keep lecture classes out of laboratories, and lab classes in them.
+    if (room_id) {
+      const [[room]] = await pool.query('SELECT building, room_number, room_type FROM rooms WHERE id = ?', [room_id])
+      if (room && self.session_type === 'lecture' && room.room_type === 'Laboratory') {
+        return res.status(400).json({ message: `${room.building} ${room.room_number} is a laboratory (LAB) — it's reserved for lab classes, not lectures.` })
+      }
+      if (room && self.session_type === 'lab' && room.room_type !== 'Laboratory') {
+        return res.status(400).json({ message: `${room.building} ${room.room_number} is a ${room.room_type} room — lab classes need a laboratory (LAB).` })
+      }
+    }
 
     const newDays  = days.split(',')
     const newStart = timeToMin(start_time)

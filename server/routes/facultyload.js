@@ -2,6 +2,8 @@ import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { generateFacultyLoadingDocx } from '../utils/facultyLoadingDocx.js'
+import { hasDeptGrant, grantedDepartments } from '../utils/deptAccess.js'
+import { notify } from '../utils/notify.js'
 
 const router = Router()
 
@@ -12,6 +14,9 @@ const router = Router()
 // finishes or gets returned and resubmitted from scratch.
 export async function syncConfirmation(chairId, academicYear, semester, instructorId) {
   if (!instructorId) return
+  // A placeholder can't confirm anything (see submissions.js) — never queue one.
+  const [[who]] = await pool.query('SELECT is_placeholder FROM users WHERE id = ?', [instructorId])
+  if (who?.is_placeholder) return
   const [[sub]] = await pool.query(
     `SELECT id FROM submissions WHERE chair_id = ? AND academic_year = ? AND semester = ? AND status = 'pending_instructor'`,
     [chairId, academicYear, semester]
@@ -116,7 +121,10 @@ async function crossDeptTarget(chairId, actorRole, instructorId) {
 // Message if the request can't be made, otherwise null: the instructor must be
 // open to other departments (or have picked this exact subject as a
 // specialty), and this subject must not push them past the hard unit cap.
-async function crossDeptProblem(inst, subjectId, year, semester, credit) {
+async function crossDeptProblem(inst, subjectId, year, semester, credit, chairId) {
+  if (!(await hasDeptGrant(chairId, inst.department, year, semester))) {
+    return `Ask the Dean of ${inst.department} for access first (Teaching Requests → Ask another college). Once they approve, you can pick ${inst.name}.`
+  }
   const [[spec]] = subjectId
     ? await pool.query('SELECT COUNT(*) AS n FROM instructor_specialties WHERE instructor_id = ? AND subject_id = ?', [inst.id, subjectId])
     : [[{ n: 0 }]]
@@ -143,6 +151,18 @@ async function createCrossDeptRequest(entryId, instructorId, chairId, note) {
     'INSERT INTO cross_dept_requests (entry_id, instructor_id, requested_by, note) VALUES (?, ?, ?, ?)',
     [entryId, instructorId, chairId, note ? String(note).slice(0, 255) : null]
   )
+  const [[info]] = await pool.query(
+    `SELECT e.course_code, e.program_yr_sec, c.name AS chair_name, c.department AS chair_dept, i.role AS instructor_role
+     FROM faculty_load_entries e JOIN users c ON c.id = ? JOIN users i ON i.id = ? WHERE e.id = ?`,
+    [chairId, instructorId, entryId]
+  )
+  if (info) {
+    await notify([instructorId], {
+      type: 'teaching_request', refId: entryId, link: `/${info.instructor_role}/teaching-requests`,
+      title: `${info.chair_name} (${info.chair_dept}) asked you to teach ${info.course_code} ${info.program_yr_sec}`,
+      body: note ? String(note).slice(0, 255) : 'Open Teaching Requests to accept or decline.',
+    })
+  }
 }
 
 // GET /api/faculty-load/section-counts?year=&semester=  — { [year_level]: section_count }
@@ -193,6 +213,7 @@ router.get('/', authenticate, authorize('chair', 'admin'), async (req, res) => {
       SELECT fle.*,
         u.name AS instructor_name,
         u.department AS instructor_dept,
+        u.is_placeholder AS instructor_is_placeholder,
         ps.prerequisite,
         (SELECT r.status FROM cross_dept_requests r WHERE r.entry_id = fle.id AND r.status IN ('pending_instructor','pending_home','declined') ORDER BY r.id DESC LIMIT 1) AS request_status,
         (SELECT ri.name FROM cross_dept_requests r JOIN users ri ON ri.id = r.instructor_id WHERE r.entry_id = fle.id AND r.status IN ('pending_instructor','pending_home','declined') ORDER BY r.id DESC LIMIT 1) AS request_instructor,
@@ -321,11 +342,17 @@ router.get('/instructors/:subjectId', authenticate, authorize('chair', 'admin'),
         (u.department = 'PATHFIT') AS is_pathfit,
         (u.department = 'NSTP') AS is_nstp
       FROM users u
-      WHERE u.role IN ('instructor', 'chair', 'dean') AND ${deptCondition}
+      WHERE u.role IN ('instructor', 'chair', 'dean') AND u.is_placeholder = 0 AND ${deptCondition}
       ORDER BY has_specialty DESC, specialty_priority ASC, u.name ASC
     `, [req.params.subjectId, req.params.subjectId, ...deptParams])
 
-    const result = instructors.map(i => ({
+    // Other colleges' instructors only appear once that college's Dean has
+    // approved this chair's access request for the term.
+    const granted = await grantedDepartments(req.user.id, year, semester)
+    const visible = instructors.filter(i => requiredDept || i.department === me?.department
+      || POOL_DEPARTMENTS.has(i.department) || granted.has(i.department))
+
+    const result = visible.map(i => ({
       ...i,
       current_units: loadMap[i.id] || 0,
       has_specialty: i.has_specialty > 0,
@@ -346,7 +373,7 @@ router.get('/instructors-all', authenticate, authorize('chair', 'admin'), async 
     const loadMap = await getCombinedLoadMap(year, semester)
 
     const [instructors] = await pool.query(
-      "SELECT id, name, department, role, (department = 'General Education') AS is_ge, (department = 'PATHFIT') AS is_pathfit, (department = 'NSTP') AS is_nstp FROM users WHERE role IN ('instructor', 'chair', 'dean') ORDER BY department, name"
+      "SELECT id, name, department, role, (department = 'General Education') AS is_ge, (department = 'PATHFIT') AS is_pathfit, (department = 'NSTP') AS is_nstp FROM users WHERE role IN ('instructor', 'chair', 'dean') AND is_placeholder = 0 ORDER BY department, name"
     )
     res.json(instructors.map(i => ({ ...i, current_units: loadMap[i.id] || 0 })))
   } catch (err) {
@@ -370,7 +397,7 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
     // Another department's instructor → send a request instead of assigning.
     const cross = await crossDeptTarget(req.user.id, req.user.role, assigned_instructor_id)
     if (cross) {
-      const problem = await crossDeptProblem(cross, subject_id, academic_year, semester, unitCredit(subject.lec_hours, subject.lab_hours))
+      const problem = await crossDeptProblem(cross, subject_id, academic_year, semester, unitCredit(subject.lec_hours, subject.lab_hours), req.user.id)
       if (problem) return res.status(400).json({ message: problem })
     }
     const [r] = await pool.query(`
@@ -415,7 +442,7 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
           const [[sub]] = await pool.query('SELECT lec_hours, lab_hours FROM prospectus_subjects WHERE id = ?', [subject_id])
           if (sub) { credit = unitCredit(sub.lec_hours, sub.lab_hours); subjId = subject_id }
         }
-        const problem = await crossDeptProblem(cross, subjId, before.academic_year, before.semester, credit)
+        const problem = await crossDeptProblem(cross, subjId, before.academic_year, before.semester, credit, req.user.id)
         if (problem) return res.status(400).json({ message: problem })
       }
     }
@@ -585,7 +612,7 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
         GROUP_CONCAT(CONCAT(isp.subject_id, ':', isp.priority)) AS specialty_ids
       FROM users u
       LEFT JOIN instructor_specialties isp ON isp.instructor_id = u.id
-      WHERE u.role IN ('instructor', 'chair', 'dean') ${deptFilter}
+      WHERE u.role IN ('instructor', 'chair', 'dean') AND u.is_placeholder = 0 ${deptFilter}
       GROUP BY u.id
       ORDER BY u.name
     `, deptParam)

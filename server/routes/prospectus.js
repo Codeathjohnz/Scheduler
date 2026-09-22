@@ -3,6 +3,7 @@ import mammoth from 'mammoth'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { parseProspectusPdf } from '../utils/parseProspectusPdf.js'
+import { notifyPlaceholderMatches } from './placeholders.js'
 
 const router = Router()
 
@@ -387,6 +388,7 @@ router.put('/specialties/me', authenticate, authorize('instructor', 'chair', 'de
       )
     }
     await conn.commit()
+    notifyPlaceholderMatches(req.user.id)   // fire-and-forget: hint chairs holding a matching placeholder
     res.json({ message: 'Specialties saved.', count: picks.length })
   } catch (err) {
     await conn.rollback()

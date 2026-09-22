@@ -4,6 +4,7 @@ import StatCard from '../../components/ui/StatCard.jsx'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
 import { submissionsAPI } from '../../services/api.js'
+import NotificationBox from '../../components/common/NotificationBox.jsx'
 
 const STATUS_LABEL = {
   pending_dean:      'Pending Your Review',
@@ -47,6 +48,7 @@ export default function DeanDashboard() {
         title={`Welcome, ${user?.name}`}
         subtitle={`Dean, ${user?.department} – Review faculty load submissions confirmed by all instructors in your college.`}
       />
+      <NotificationBox />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard label="Pending Review"    value={String(pending.length)}     icon={Clock}         color="gold" />

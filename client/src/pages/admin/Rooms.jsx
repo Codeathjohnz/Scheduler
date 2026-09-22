@@ -107,6 +107,7 @@ export default function AdminRooms() {
   const [saving, setSaving]     = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [filterType, setFilterType]     = useState('all')
+  const [filterBuilding, setFilterBuilding] = useState(null)   // null = every building
 
   const [priorities, setPriorities]     = useState({})
   const [editingBuilding, setEditingBuilding] = useState(null)
@@ -285,7 +286,7 @@ export default function AdminRooms() {
     }
   }
 
-  const filtered = filterType === 'all' ? rooms : rooms.filter(r => r.room_type === filterType)
+  const filtered = rooms.filter(r => (filterType === 'all' || r.room_type === filterType) && (!filterBuilding || r.building === filterBuilding))
 
   const counts = {
     total:      rooms.length,
@@ -343,14 +344,22 @@ export default function AdminRooms() {
             Rank which programs get first use of each building's rooms when a schedule is generated.
             A building with no ranked programs stays open to every program.
           </p>
+          {filterBuilding && (
+            <p className="text-xs text-green-700 font-semibold mb-3">
+              Showing rooms in {filterBuilding} only.{' '}
+              <button onClick={() => setFilterBuilding(null)} className="underline hover:text-green-800">Show all buildings</button>
+            </p>
+          )}
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {buildings.map(b => {
               const list = priorities[b] || []
               return (
-                <div key={b} className="border border-gray-200 rounded-xl p-3.5">
+                <div key={b} onClick={() => setFilterBuilding(fb => fb === b ? null : b)}
+                  title={filterBuilding === b ? 'Click to show all buildings' : `Show only ${b} rooms`}
+                  className={`border rounded-xl p-3.5 cursor-pointer transition ${filterBuilding === b ? 'border-green-500 ring-2 ring-green-500 bg-green-50/40' : 'border-gray-200 hover:border-green-300'}`}>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-gray-800 text-sm">{b}</span>
-                    <button onClick={() => openPriorityEditor(b)}
+                    <span className="font-bold text-gray-800 text-sm">{b} <span className="text-xs font-medium text-gray-400">· {rooms.filter(r => r.building === b).length} rooms</span></span>
+                    <button onClick={e => { e.stopPropagation(); openPriorityEditor(b) }}
                       className="p-1.5 text-gray-400 hover:text-green-700 hover:bg-green-50 rounded-lg transition">
                       <Pencil className="w-3.5 h-3.5" />
                     </button>

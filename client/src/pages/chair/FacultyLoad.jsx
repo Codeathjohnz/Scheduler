@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, Fragment } from 'react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
-import { prospectusAPI, facultyLoadAPI, submissionsAPI, schedulingAPI } from '../../services/api.js'
+import { prospectusAPI, facultyLoadAPI, submissionsAPI, schedulingAPI, placeholdersAPI } from '../../services/api.js'
+import PlaceholdersPanel from './PlaceholdersPanel.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import {
@@ -658,7 +659,7 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
                 </optgroup>
               )}
               {crossDept.length > 0 && (
-                <optgroup label="🤝 Other departments — they must agree first">
+                <optgroup label="🤝 Other colleges (Dean approved) — they must accept">
                   {crossDept.map(i => (
                     <option key={i.id} value={i.id}>
                       {i.name} [{i.department}]{roleTag(i)}{i.specialty_summary ? ` · ${i.specialty_summary}` : ''} — {i.current_units} units loaded
@@ -679,13 +680,18 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
             {crossDept.some(i => String(i.id) === String(form.assigned_instructor_id)) && (
               <div className="mt-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 space-y-2">
                 <p className="text-xs text-blue-800">
-                  This instructor belongs to another department. Saving sends them a <strong>request</strong> — the subject stays unassigned
-                  and doesn't count toward their load until they accept and their own department approves.
+                  This instructor belongs to another college, whose Dean has approved your request. Saving sends them a <strong>request</strong> —
+                  the subject stays unassigned and doesn't count toward their load until they accept.
                 </p>
                 <input value={form.request_note} onChange={e=>setForm(f=>({...f,request_note:e.target.value}))} maxLength={255}
                   placeholder="Why this instructor? e.g. digital innovation in agriculture — 3 units, Mon/Wed"
                   className="w-full border-2 border-blue-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-blue-500 bg-white" />
               </div>
+            )}
+            {crossDept.length === 0 && (
+              <p className="text-xs text-gray-500 mt-1">
+                Need an instructor from another college? Ask that college's Dean first under <a href="/chair/teaching-requests" className="text-green-700 font-semibold underline">Teaching Requests</a>.
+              </p>
             )}
             {specialists.length > 0 && (
               <p className="text-xs text-green-600 mt-1">
@@ -874,6 +880,8 @@ export default function FacultyLoad() {
   const [assignTarget, setAssignTarget] = useState(null)   // { instructorId, instructorName } — picker open for this instructor
   const [assigningId, setAssigningId]   = useState(null)   // entry id currently being assigned
   const [generating, setGenerating]       = useState(false)
+  const [phRefresh, setPhRefresh]         = useState(0)      // bump to reload the placeholders panel
+  const [fillingPh, setFillingPh]         = useState(false)
   const [autoGenResult, setAutoGenResult] = useState(null)
   const [inlineEdit, setInlineEdit]       = useState(null)
   const [termStatus, setTermStatus]       = useState(null)   // current submission status for this term
@@ -1175,6 +1183,22 @@ export default function FacultyLoad() {
       fetchEntries()
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to remove.')
+    }
+  }
+
+  // Park every still-unassigned subject on "Instructor A/B/C…" so the load can be
+  // completed and approved; a real instructor is swapped in later (Placeholders panel).
+  const handleFillPlaceholders = async () => {
+    setFillingPh(true)
+    try {
+      const r = await placeholdersAPI.fill(loadYear, loadSem)
+      toast.success(r.data.message, { duration: 6000 })
+      await fetchEntries()
+      setPhRefresh(k => k + 1)
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not assign placeholders.')
+    } finally {
+      setFillingPh(false)
     }
   }
 
@@ -1503,9 +1527,17 @@ export default function FacultyLoad() {
           {entries.some(e => !e.assigned_instructor_id) && (
             <div className="mb-4 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
               <span className="text-base">⚠</span>
-              <span><strong>{entries.filter(e=>!e.assigned_instructor_id).length} subject{entries.filter(e=>!e.assigned_instructor_id).length>1?'s':''}</strong> still have no instructor assigned — click the edit button on those rows to assign manually.</span>
+              <span className="flex-1"><strong>{entries.filter(e=>!e.assigned_instructor_id).length} subject{entries.filter(e=>!e.assigned_instructor_id).length>1?'s':''}</strong> still have no instructor assigned — click the edit button on those rows to assign manually, or park them on placeholders.</span>
+              <button onClick={handleFillPlaceholders} disabled={fillingPh}
+                title="Gives each unassigned subject a stand-in (Instructor A, B, C…) so the load can be approved. Swap in a real instructor later."
+                className="shrink-0 flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold px-3 py-1.5 rounded-lg text-xs">
+                {fillingPh ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Users className="w-3.5 h-3.5" />} Assign placeholders
+              </button>
             </div>
           )}
+
+          <PlaceholdersPanel year={loadYear} semester={loadSem} refreshKey={phRefresh}
+            onChanged={() => { fetchEntries(); setPhRefresh(k => k + 1) }} />
 
           {/* Overload warning */}
           {overloadedInstructors.length > 0 && (
@@ -1671,6 +1703,7 @@ export default function FacultyLoad() {
                             <span className="ml-2 text-xs text-green-300 font-medium">— {grp.dept}</span>
                           )}
                           {isUnassigned && <span className="ml-2 text-xs bg-amber-200 text-amber-900 font-semibold px-2 py-0.5 rounded-full">Needs Assignment</span>}
+                          {!isUnassigned && grp.entries[0]?.instructor_is_placeholder ? <span className="ml-2 text-xs bg-indigo-200 text-indigo-900 font-semibold px-2 py-0.5 rounded-full">Placeholder</span> : null}
                           {overMax && (
                             <span
                               title={`${grandCredit.toFixed(2)} unit credit — over the ${MAX_UNITS}-unit hard cap. Unassign a subject or reduce their other load before submitting.`}

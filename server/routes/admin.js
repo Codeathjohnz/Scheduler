@@ -12,7 +12,7 @@ router.get('/stats', authenticate, authorize('admin'), async (req, res) => {
     const [[counts]] = await pool.query(`
       SELECT
         (SELECT COUNT(*) FROM rooms)                                                        AS total_rooms,
-        (SELECT COUNT(*) FROM users WHERE role = 'instructor')                             AS total_instructors,
+        (SELECT COUNT(*) FROM users WHERE role = 'instructor' AND is_placeholder = 0)      AS total_instructors,
         (SELECT COUNT(*) FROM users WHERE role = 'chair')                                  AS total_chairs,
         (SELECT COUNT(*) FROM submissions WHERE status = 'endorsed')                       AS pending_validation,
         (SELECT COUNT(*) FROM submissions)                                                  AS total_submissions,
@@ -127,6 +127,7 @@ router.get('/activity', authenticate, authorize('admin'), async (req, res) => {
     // 4. Recent new users
     const [userRows] = await pool.query(`
       SELECT name, role, created_at AS ts FROM users
+      WHERE is_placeholder = 0
       ORDER BY created_at DESC LIMIT 4
     `)
     for (const u of userRows) {

@@ -1,15 +1,27 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext.jsx'
-import { LogOut, KeyRound } from 'lucide-react'
+import { LogOut, KeyRound, Bell } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ChangePasswordModal from './ChangePasswordModal.jsx'
 import adssuLogo from '../../assets/adssu-logo.png'
+import { notificationsAPI } from '../../services/api.js'
 
 export default function Sidebar({ navItems, roleLabel }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [showChangePw, setShowChangePw] = useState(false)
+  const [unread, setUnread] = useState(0)
+
+  // Unread-notification count for the bell — the notifications themselves live
+  // in the box on the dashboard (first nav item).
+  useEffect(() => {
+    let alive = true
+    const poll = () => notificationsAPI.unreadCount().then(r => alive && setUnread(r.data.unread)).catch(() => {})
+    poll()
+    const t = setInterval(poll, 60000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
 
   const handleLogout = () => {
     logout()
@@ -26,10 +38,19 @@ export default function Sidebar({ navItems, roleLabel }) {
             <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shrink-0 shadow overflow-hidden">
               <img src={adssuLogo} alt="ADSSU seal" className="w-[85%] h-[85%] object-contain" />
             </div>
-            <div>
+            <div className="flex-1 min-w-0">
               <p className="text-white font-bold text-sm leading-tight">ADSSU</p>
               <p className="text-green-300 text-xs">Room Scheduling System</p>
             </div>
+            <button onClick={() => navigate(navItems[0].to)} title={unread ? `${unread} unread notification${unread > 1 ? 's' : ''}` : 'Notifications'}
+              className="relative p-2 rounded-lg text-green-200 hover:bg-green-800 hover:text-white transition shrink-0">
+              <Bell className="w-4 h-4" />
+              {unread > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                  {unread > 9 ? '9+' : unread}
+                </span>
+              )}
+            </button>
           </div>
         </div>
 
