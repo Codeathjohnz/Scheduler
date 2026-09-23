@@ -25,7 +25,7 @@ router.post('/login', async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: '30d' }
     )
-    res.json({ token, user: { id: user.id, username: user.username, role: user.role, name: user.name, department: user.department, section: user.section } })
+    res.json({ token, user: { id: user.id, username: user.username, role: user.role, name: user.name, department: user.department, section: user.section, programs: user.programs } })
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
   }
