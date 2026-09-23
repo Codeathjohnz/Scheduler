@@ -177,8 +177,10 @@ export default function UserManagement() {
   useEffect(() => { fetchUsers() }, [fetchUsers])
 
   // Programs to offer in the instructor form follow the chosen department.
+  const PROGRAM_ROLES = ['instructor', 'chair']
+
   useEffect(() => {
-    if (!showModal || form.role !== 'instructor' || !form.department.trim()) { setProgramOptions([]); return }
+    if (!showModal || !PROGRAM_ROLES.includes(form.role) || !form.department.trim()) { setProgramOptions([]); return }
     const t = setTimeout(() => {
       usersAPI.getProgramOptions(form.department.trim()).then(r => setProgramOptions(r.data)).catch(() => setProgramOptions([]))
     }, 300)
@@ -223,12 +225,12 @@ export default function UserManagement() {
     setSaving(true)
     try {
       if (editUser) {
-        const payload = { name: form.name, role: form.role, department: form.department, section: form.section, email: form.email, programs: form.role === 'instructor' ? form.programs : [] }
+        const payload = { name: form.name, role: form.role, department: form.department, section: form.section, email: form.email, programs: PROGRAM_ROLES.includes(form.role) ? form.programs : [] }
         if (form.password) payload.password = form.password
         await usersAPI.update(editUser.id, payload)
         toast.success('User updated successfully.')
       } else {
-        await usersAPI.create({ ...form, programs: form.role === 'instructor' ? form.programs : [] })
+        await usersAPI.create({ ...form, programs: PROGRAM_ROLES.includes(form.role) ? form.programs : [] })
         toast.success('User created successfully.')
       }
       closeModal()
@@ -359,13 +361,15 @@ export default function UserManagement() {
                     <td className="px-5 py-3 text-gray-500 text-xs">
                       {u.department || '—'}
                       {u.section && <span className="ml-1 text-green-600 font-medium">· {u.section}</span>}
-                      {u.role === 'instructor' && (
+                      {(u.role === 'instructor' || u.role === 'chair') && (
                         <div className="flex flex-wrap gap-1 mt-1">
                           {splitPrograms(u.programs).length > 0
                             ? splitPrograms(u.programs).map(p => (
-                                <span key={p} className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-100 text-green-800">{p}</span>
+                                <span key={p} className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${u.role === 'chair' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>
+                                  {u.role === 'chair' ? `Chair — ${p}` : p}
+                                </span>
                               ))
-                            : <span className="text-[10px] text-gray-400 italic">No program set</span>}
+                            : <span className="text-[10px] text-gray-400 italic">{u.role === 'chair' ? 'Chairs every program' : 'No program set'}</span>}
                         </div>
                       )}
                     </td>
@@ -495,14 +499,21 @@ export default function UserManagement() {
                 </datalist>
               </div>
 
-              {/* Programs — instructors only: which program(s) they teach for */}
-              {form.role === 'instructor' && (
+              {/* Programs — instructors: which program(s) they teach for.
+                  Chairs: which program(s) they're Program Chair of — required
+                  when a department runs more than one (e.g. CCIS has BSIT and
+                  BSIS, each with its own chair) so they're never confused for
+                  the other program's chair. */}
+              {PROGRAM_ROLES.includes(form.role) && (
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">
-                    Teaches for Program(s)
+                    {form.role === 'chair' ? 'Program Chair of' : 'Teaches for Program(s)'}
                     <span className="text-gray-400 font-normal"> (e.g. BSIT, BSIS, or both)</span>
                   </label>
                   <ProgramPicker value={form.programs} onChange={programs => setForm(f => ({ ...f, programs }))} options={programOptions} />
+                  {form.role === 'chair' && form.programs.length === 0 && (
+                    <p className="text-[11px] text-amber-600 mt-1">Leave blank only if this department runs a single program — otherwise pick which one this chair is for.</p>
+                  )}
                 </div>
               )}
 

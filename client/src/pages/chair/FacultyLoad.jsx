@@ -1755,6 +1755,12 @@ export default function FacultyLoad() {
                                 <td className="px-4 py-2.5 font-mono font-semibold text-green-800 text-xs whitespace-nowrap">{e.course_code}</td>
                                 <td className="px-4 py-2.5 text-gray-700 text-xs">
                                   {e.descriptive_title}
+                                  {!!e.program_mismatch && (
+                                    <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800"
+                                      title={`${e.instructor_name} isn't tagged for ${e.subject_program || 'this'} — reassign to a matching instructor, or fix their programs on My Specialty/Manage Users.`}>
+                                      ⚠ Wrong program for {e.instructor_name}
+                                    </span>
+                                  )}
                                   {!e.assigned_instructor_id && e.request_status && e.request_status !== 'declined' && (
                                     <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800" title="Waiting on the other department — see Teaching Requests">
                                       {e.request_status === 'pending_instructor' ? `Asked ${e.request_instructor}` : `${e.request_instructor} accepted — awaiting their dept`}

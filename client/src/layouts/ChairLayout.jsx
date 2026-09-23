@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from '../components/common/Sidebar.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import { LayoutDashboard, CalendarDays, BookOpen, Briefcase, GraduationCap, Accessibility, CheckSquare, ClipboardList, ArrowLeftRight } from 'lucide-react'
 
 const nav = [
@@ -15,9 +16,15 @@ const nav = [
 ]
 
 export default function ChairLayout() {
+  const { user } = useAuth()
+  // A department that runs more than one program (CCIS has BSIT and BSIS) has
+  // one chair per program — label which one this account chairs, so it's
+  // never mistaken for the other program's chair.
+  const programs = String(user?.programs || '').split(',').map(p => p.trim()).filter(Boolean)
+  const roleLabel = programs.length ? `Program Chair — ${programs.join(', ')}` : 'Program Chair'
   return (
     <div className="flex min-h-screen bg-gray-100">
-      <Sidebar navItems={nav} roleLabel="Program Chair" />
+      <Sidebar navItems={nav} roleLabel={roleLabel} />
       <main className="flex-1 p-8 overflow-y-auto min-h-screen">
         <Outlet />
       </main>

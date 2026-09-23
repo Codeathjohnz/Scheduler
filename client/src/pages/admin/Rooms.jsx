@@ -632,6 +632,12 @@ export default function AdminRooms() {
             </div>
 
             <div className="px-6 py-5 space-y-4">
+              <p className="text-xs text-gray-500 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                Rank a whole department (e.g. <strong>CCIS</strong>) or a specific program within it
+                (e.g. <strong>BSIT</strong>, <strong>BSIS</strong>). If a department runs more than one program,
+                ranking the programs separately gives each one its own priority here instead of sharing the
+                department's — a program's own rank always wins over its department's when both are set.
+              </p>
               {draftPrograms.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-3">
                   No programs ranked yet — this building is open to all programs.

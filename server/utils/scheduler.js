@@ -145,18 +145,27 @@ function buildPatterns(lecHours, labHours) {
 
 /**
  * @param {string} building
- * @param {string|null} program
- * @param {object} buildingPriorities - { [building]: { [program]: rank } }
+ * @param {string|null} department  - e.g. "CCIS"
+ * @param {object} buildingPriorities - { [building]: { [programOrDept]: rank } }
+ * @param {string|null} [program]   - the subject's specific curriculum
+ *   program, e.g. "BSIT" — a department that runs more than one program
+ *   (CCIS has BSIT and BSIS) can rank them separately in the same building.
+ *   A program-specific rule is more precise than a department-wide one, so
+ *   it wins whenever both are set for the same building; the department
+ *   rule remains the fallback for a building only ranked at that level.
  * @returns {{ allowed: boolean, rank: number|null }}
  *   rank === null means the building is unmanaged (open to everyone, no bonus).
  */
-function buildingAccess(building, program, buildingPriorities) {
+function buildingAccess(building, department, buildingPriorities, program = null) {
   const rules = buildingPriorities[building]
   if (!rules || Object.keys(rules).length === 0) {
     return { allowed: true, rank: null }
   }
   if (program && Object.prototype.hasOwnProperty.call(rules, program)) {
     return { allowed: true, rank: rules[program] }
+  }
+  if (department && Object.prototype.hasOwnProperty.call(rules, department)) {
+    return { allowed: true, rank: rules[department] }
   }
   return { allowed: false, rank: null }
 }
@@ -181,7 +190,7 @@ function roomAllowsProgram(room, department, program) {
 
 function filterRoomsByProgram(rooms, department, program, buildingPriorities) {
   return rooms
-    .filter(r => buildingAccess(r.building, department, buildingPriorities).allowed)
+    .filter(r => buildingAccess(r.building, department, buildingPriorities, program).allowed)
     .filter(r => roomAllowsProgram(r, department, program))
 }
 
@@ -207,8 +216,10 @@ function scoreSlot(session, pattern, startMin, room, scheduled, buildingPrioriti
   const mobility   = session.mobilityLevel || 3
 
   // Building priority: reward the room's building in proportion to how highly
-  // the session's program is ranked there (rank 1 = strongest bonus).
-  const access = buildingAccess(room.building, session.department, buildingPriorities)
+  // the session's program is ranked there (rank 1 = strongest bonus). A
+  // program-specific rank (e.g. "BSIT") wins over the department's (e.g.
+  // "CCIS") when both are set for this building.
+  const access = buildingAccess(room.building, session.department, buildingPriorities, session.program)
   if (access.rank != null) {
     score += Math.max(0, 120 - (access.rank - 1) * 25)
   }
@@ -334,14 +345,16 @@ function tryOnlineFallback(session, scheduled) {
 export function buildSessions(entries, rooms, mobilityMap, buildingPriorities) {
   // Best (lowest) building-priority rank a program can reach for a given room type,
   // across all buildings offering that room type. null = no reserved priority anywhere.
+  // Checks the subject's specific program (e.g. "BSIT") first, falling back to
+  // the whole department (e.g. "CCIS") only where no program-level rule exists.
   const deptRankCache = {}
-  function bestDeptRank(program, roomType) {
-    if (!program) return null
-    const key = `${program}::${roomType}`
+  function bestDeptRank(department, program, roomType) {
+    if (!department && !program) return null
+    const key = `${department}::${program}::${roomType}`
     if (key in deptRankCache) return deptRankCache[key]
     let best = null
     for (const building of new Set(rooms.filter(r => r.room_type === roomType).map(r => r.building))) {
-      const access = buildingAccess(building, program, buildingPriorities)
+      const access = buildingAccess(building, department, buildingPriorities, program)
       if (access.allowed && access.rank != null && (best === null || access.rank < best)) {
         best = access.rank
       }
@@ -377,7 +390,7 @@ export function buildSessions(entries, rooms, mobilityMap, buildingPriorities) {
         // Placeholder instructors ("Instructor A") stand in for people who don't
         // exist yet — real instructors' sessions are placed first (see generateSchedule).
         isPlaceholder:  !!entry.is_placeholder,
-        deptRank:       bestDeptRank(department, roomType),
+        deptRank:       bestDeptRank(department, program, roomType),
       })
     }
   }
@@ -862,7 +875,7 @@ export function generateScheduleGA(entries, rooms, mobilityMap = {}, buildingPri
 // constant to a solver that evaluates all sessions simultaneously.
 function computeStaticScore(session, room, buildingPriorities) {
   let score = 0
-  const access = buildingAccess(room.building, session.department, buildingPriorities)
+  const access = buildingAccess(room.building, session.department, buildingPriorities, session.program)
   if (access.rank != null) score += Math.max(0, 120 - (access.rank - 1) * 25)
 
   const mobility = session.mobilityLevel || 3
