@@ -197,12 +197,16 @@ async function pooledSubjects(matches, semester) {
 // copy of a subject is its own prospectus_subjects row (and instructor
 // specialties are selected per row), so a subject two programs happen to
 // share still needs to appear once per program.
-async function departmentSubjects(department, semester) {
+// `programs` (this instructor's own users.programs, split into an array) —
+// when set, a multi-program department's subjects are further narrowed to
+// just the program(s) they teach for, same rule as the Faculty Load picker
+// (an untagged instructor stays open to every program in the department).
+async function departmentSubjects(department, semester, programs = []) {
   const params = [department, department]
   let semFilter = ''
   if (semester) { semFilter = 'AND ps.semester = ?'; params.push(semester) }
   const [rows] = await pool.query(`
-    SELECT ps.*
+    SELECT ps.*, p.program AS prospectus_program
     FROM prospectus_subjects ps
     JOIN prospectus p ON ps.prospectus_id = p.id
     JOIN users u ON p.uploaded_by = u.id
@@ -215,25 +219,38 @@ async function departmentSubjects(department, semester) {
     WHERE u.department = ? ${semFilter}
     ORDER BY ps.year_level, ps.semester, ps.id
   `, params)
-  return rows.filter(s => !isGeneralEd(s.course_code) && !isPathfit(s.course_code) && !isNstp(s.course_code))
+  // GE/PATHFIT/NSTP are shared pools taught by their own dedicated
+  // instructors, never a major department's own instructors — those subjects
+  // simply aren't this department's field, so they're excluded here rather
+  // than left for the instructor to (wrongly) pick as their specialty.
+  const major = rows.filter(s => !isGeneralEd(s.course_code) && !isPathfit(s.course_code) && !isNstp(s.course_code))
+  const scoped = programs.length
+    ? major.filter(s => !s.prospectus_program || programs.includes(String(s.prospectus_program).trim().toUpperCase()))
+    : major
+  return scoped.map(({ prospectus_program, ...rest }) => rest)
 }
 
 // GET /api/prospectus/latest/subjects?semester=1  — subjects from the most
-// recent prospectus for the caller's own department (a Chair's own uploads,
-// unfiltered — they need to see everything, GE/PATHFIT/NSTP included, to
-// build their course offering). For an Instructor: a General Education
-// instructor gets the union of GE rows across every department's latest
-// prospectus; a PATHFIT instructor gets the union of PATHFIT rows the same
-// way; an NSTP instructor gets the union of NSTP rows the same way; every
-// other department instructor gets the union of every chair's latest
+// recent prospectus for the caller's own department. For a Chair: their own
+// uploaded prospectus, with `?include_pools=1` (Faculty Load — they need to
+// see every subject, GE/PATHFIT/NSTP included, to assign each one to an
+// instructor) as the one case that gets everything unfiltered; without it
+// (My Specialty — picking subjects THEY personally want to teach), GE/
+// PATHFIT/NSTP are excluded exactly like for a regular instructor below,
+// since those pools aren't their major either. For an Instructor: a General
+// Education instructor gets the union of GE rows across every department's
+// latest prospectus; a PATHFIT instructor gets the union of PATHFIT rows the
+// same way; an NSTP instructor gets the union of NSTP rows the same way;
+// every other department instructor gets the union of every chair's latest
 // prospectus within their own department (see departmentSubjects above),
-// with all three pools excluded.
+// with all three pools excluded — GE/PATHFIT/NSTP are never a major
+// department's own field, so they never belong in that specialty list.
 router.get('/latest/subjects', authenticate, async (req, res) => {
   const isChair = req.user.role === 'chair'
   const isGeInstructor      = !isChair && req.user.department === 'General Education'
   const isPathfitInstructor = !isChair && req.user.department === 'PATHFIT'
   const isNstpInstructor    = !isChair && req.user.department === 'NSTP'
-  const { semester } = req.query
+  const { semester, include_pools } = req.query
   try {
     if (isChair) {
       const [[latest]] = await pool.query(
@@ -248,7 +265,8 @@ router.get('/latest/subjects', authenticate, async (req, res) => {
         `SELECT * FROM prospectus_subjects WHERE prospectus_id = ? ${semFilter} ORDER BY year_level, semester, id`,
         params
       )
-      return res.json(subjects)
+      if (include_pools) return res.json(subjects)
+      return res.json(subjects.filter(s => !isGeneralEd(s.course_code) && !isPathfit(s.course_code) && !isNstp(s.course_code)))
     }
 
     if (isGeInstructor) {
@@ -261,7 +279,9 @@ router.get('/latest/subjects', authenticate, async (req, res) => {
       return res.json(await pooledSubjects(isNstp, semester))
     }
 
-    res.json(await departmentSubjects(req.user.department, semester))
+    const [[me]] = await pool.query('SELECT programs FROM users WHERE id = ?', [req.user.id])
+    const programs = String(me?.programs || '').split(',').map(p => p.trim().toUpperCase()).filter(Boolean)
+    res.json(await departmentSubjects(req.user.department, semester, programs))
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
   }
@@ -369,11 +389,17 @@ router.put('/specialties/me', authenticate, authorize('instructor', 'chair', 'de
   const { subject_ids, specialties } = req.body
   let picks
   if (Array.isArray(specialties)) {
-    picks = specialties.map(sp => ({ subject_id: sp.subject_id, priority: Number(sp.priority) === 2 ? 2 : 1 }))
+    picks = specialties.map(sp => ({ subject_id: Number(sp?.subject_id), priority: Number(sp?.priority) === 2 ? 2 : 1 }))
   } else if (Array.isArray(subject_ids)) {
-    picks = subject_ids.map(id => ({ subject_id: id, priority: 1 }))
+    picks = subject_ids.map(id => ({ subject_id: Number(id), priority: 1 }))
   } else {
     return res.status(400).json({ message: 'specialties must be an array.' })
+  }
+  // A malformed entry (e.g. a stray object instead of a numeric id — this is
+  // exactly how a past client/server field-name mismatch used to silently
+  // insert nothing while still reporting success) fails loudly here instead.
+  if (picks.some(p => !Number.isInteger(p.subject_id) || p.subject_id <= 0)) {
+    return res.status(400).json({ message: 'Each specialty needs a valid subject id.' })
   }
 
   const conn = await pool.getConnection()
