@@ -369,11 +369,17 @@ router.put('/specialties/me', authenticate, authorize('instructor', 'chair', 'de
   const { subject_ids, specialties } = req.body
   let picks
   if (Array.isArray(specialties)) {
-    picks = specialties.map(sp => ({ subject_id: sp.subject_id, priority: Number(sp.priority) === 2 ? 2 : 1 }))
+    picks = specialties.map(sp => ({ subject_id: Number(sp?.subject_id), priority: Number(sp?.priority) === 2 ? 2 : 1 }))
   } else if (Array.isArray(subject_ids)) {
-    picks = subject_ids.map(id => ({ subject_id: id, priority: 1 }))
+    picks = subject_ids.map(id => ({ subject_id: Number(id), priority: 1 }))
   } else {
     return res.status(400).json({ message: 'specialties must be an array.' })
+  }
+  // A malformed entry (e.g. a stray object instead of a numeric id — this is
+  // exactly how a past client/server field-name mismatch used to silently
+  // insert nothing while still reporting success) fails loudly here instead.
+  if (picks.some(p => !Number.isInteger(p.subject_id) || p.subject_id <= 0)) {
+    return res.status(400).json({ message: 'Each specialty needs a valid subject id.' })
   }
 
   const conn = await pool.getConnection()

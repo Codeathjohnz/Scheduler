@@ -172,7 +172,12 @@ export const prospectusAPI = {
   getSubjects:      (id)      => api.get(`/prospectus/${id}/subjects`),
   getLatestSubjects:(semester) => api.get(`/prospectus/latest/subjects${semester ? `?semester=${semester}` : ''}`),
   getMySpecialties: ()        => api.get('/prospectus/specialties/me'),
-  saveMySpecialties:(ids)     => api.put('/prospectus/specialties/me', { subject_ids: ids }),
+  // `specialties` is [{ subject_id, priority }] — matches the server's
+  // preferred shape (see PUT /prospectus/specialties/me). Do not rename this
+  // to subject_ids: that key expects plain numeric ids, not {subject_id,
+  // priority} objects, and previously caused every save to silently insert
+  // nothing while still reporting success.
+  saveMySpecialties:(specialties) => api.put('/prospectus/specialties/me', { specialties }),
   getInstructorSpecialties: (id) => api.get(`/prospectus/specialties/instructor/${id}`),
   getSpecialtyPeers: (semester) => api.get(`/prospectus/specialties/peers${semester ? `?semester=${semester}` : ''}`),
 }
