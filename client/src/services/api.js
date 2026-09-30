@@ -170,7 +170,13 @@ export const prospectusAPI = {
   parsePdf:         (data)    => api.post('/prospectus/parse-pdf', data),
   remove:           (id)      => api.delete(`/prospectus/${id}`),
   getSubjects:      (id)      => api.get(`/prospectus/${id}/subjects`),
-  getLatestSubjects:(semester) => api.get(`/prospectus/latest/subjects${semester ? `?semester=${semester}` : ''}`),
+  // includePools: true — a Chair building their Faculty Load needs every
+  // subject in their own prospectus, GE/PATHFIT/NSTP included, to assign each
+  // one out. Omit it (My Specialty — picking what THEY personally teach) and
+  // those pools are excluded, same as for a regular instructor.
+  getLatestSubjects:(semester, includePools) => api.get(
+    `/prospectus/latest/subjects?${[semester && `semester=${semester}`, includePools && 'include_pools=1'].filter(Boolean).join('&')}`
+  ),
   getMySpecialties: ()        => api.get('/prospectus/specialties/me'),
   // `specialties` is [{ subject_id, priority }] — matches the server's
   // preferred shape (see PUT /prospectus/specialties/me). Do not rename this

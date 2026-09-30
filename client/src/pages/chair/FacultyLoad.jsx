@@ -913,7 +913,7 @@ export default function FacultyLoad() {
 
   /* load latest prospectus subjects for the selected semester (used in the add modal + auto-generate) */
   const fetchProspectusSubjects = async () => {
-    try { const r = await prospectusAPI.getLatestSubjects(loadSem); setProspectusSubjects(r.data) }
+    try { const r = await prospectusAPI.getLatestSubjects(loadSem, true); setProspectusSubjects(r.data) }
     catch {}
   }
 
