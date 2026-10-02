@@ -211,8 +211,31 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
     return res.status(400).json({ message: 'You cannot delete your own account.' })
   }
   try {
-    const [[user]] = await pool.query('SELECT id FROM users WHERE id = ?', [req.params.id])
+    const [[user]] = await pool.query('SELECT id, name FROM users WHERE id = ?', [req.params.id])
     if (!user) return res.status(404).json({ message: 'User not found.' })
+
+    // These three hold a whole department's real curriculum/schedule work,
+    // not just this one person's own data — deleting the account would
+    // either silently orphan them or (for the ones a user-delete can't
+    // reach anyway) fail with a raw foreign-key error. Block with a clear
+    // reason instead, naming exactly what's in the way.
+    const [[blockers]] = await pool.query(
+      `SELECT
+         (SELECT COUNT(*) FROM prospectus WHERE uploaded_by = ?) AS prospectus,
+         (SELECT COUNT(*) FROM faculty_load_entries WHERE chair_id = ?) AS faculty_load,
+         (SELECT COUNT(*) FROM submissions WHERE chair_id = ?) AS submissions`,
+      [req.params.id, req.params.id, req.params.id]
+    )
+    const reasons = []
+    if (blockers.prospectus > 0) reasons.push(`${blockers.prospectus} uploaded prospectus${blockers.prospectus > 1 ? 'es' : ''}`)
+    if (blockers.faculty_load > 0) reasons.push(`${blockers.faculty_load} faculty load entr${blockers.faculty_load > 1 ? 'ies' : 'y'}`)
+    if (blockers.submissions > 0) reasons.push(`${blockers.submissions} submission${blockers.submissions > 1 ? 's' : ''}`)
+    if (reasons.length) {
+      return res.status(409).json({
+        message: `${user.name} still has ${reasons.join(', ')} as Program Chair. Reassign or remove those first, then delete this account.`,
+      })
+    }
+
     await pool.query('DELETE FROM users WHERE id = ?', [req.params.id])
     res.json({ message: 'User deleted.' })
   } catch (err) {

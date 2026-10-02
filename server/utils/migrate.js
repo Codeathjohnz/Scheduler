@@ -21,6 +21,36 @@ async function columnInfo(pool, table, column) {
   return row || null
 }
 
+// Finds the FK constraint on `table.column` that references `users(id)` —
+// looked up by table+column rather than a hardcoded constraint name, since
+// the live database's constraints (created across many ad-hoc add_*.js
+// scripts over time) don't all share database.sql's naming.
+async function fkOnUsers(pool, table, column) {
+  const [[row]] = await pool.query(
+    `SELECT k.CONSTRAINT_NAME, r.DELETE_RULE
+     FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE k
+     JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS r
+       ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+     WHERE k.TABLE_SCHEMA = DATABASE() AND k.TABLE_NAME = ? AND k.COLUMN_NAME = ?
+       AND k.REFERENCED_TABLE_NAME = 'users'
+     LIMIT 1`,
+    [table, column]
+  )
+  return row || null
+}
+
+// Re-points an existing users(id) FK to a new ON DELETE rule, idempotently.
+async function setDeleteRule(pool, table, column, rule) {
+  const fk = await fkOnUsers(pool, table, column)
+  if (!fk || fk.DELETE_RULE === rule) return false
+  await pool.query(`ALTER TABLE \`${table}\` DROP FOREIGN KEY \`${fk.CONSTRAINT_NAME}\``)
+  await pool.query(
+    `ALTER TABLE \`${table}\` ADD CONSTRAINT \`${fk.CONSTRAINT_NAME}\`
+     FOREIGN KEY (\`${column}\`) REFERENCES \`users\` (\`id\`) ON DELETE ${rule}`
+  )
+  return true
+}
+
 const steps = [
   {
     name: "rooms.room_type includes 'Gym' (+ seed one gym room)",
@@ -197,6 +227,56 @@ const steps = [
       `)
       return true
     },
+  },
+  // Deleting a user (Manage Users) was failing for anyone with rows in a
+  // handful of older tables whose users(id) foreign key had no ON DELETE
+  // rule at all (MySQL/MariaDB default: RESTRICT) — reported live as
+  // "some instructors won't delete". These four are rows that belong
+  // entirely to that one person (their own accessibility request, manual
+  // submission entry/confirmation, legacy per-instructor schedule row, or
+  // section-count preset) and are correctly removed along with them.
+  {
+    name: 'accessibility_requests.instructor_id ON DELETE CASCADE',
+    async run(pool) { return setDeleteRule(pool, 'accessibility_requests', 'instructor_id', 'CASCADE') },
+  },
+  {
+    name: 'submission_confirmations.instructor_id ON DELETE CASCADE',
+    async run(pool) { return setDeleteRule(pool, 'submission_confirmations', 'instructor_id', 'CASCADE') },
+  },
+  {
+    name: 'submission_entries.instructor_id ON DELETE CASCADE',
+    async run(pool) { return setDeleteRule(pool, 'submission_entries', 'instructor_id', 'CASCADE') },
+  },
+  {
+    name: 'schedules.instructor_id ON DELETE CASCADE (legacy per-instructor schedule row)',
+    async run(pool) { return setDeleteRule(pool, 'schedules', 'instructor_id', 'CASCADE') },
+  },
+  {
+    name: 'section_counts.chair_id ON DELETE CASCADE (regenerable per-chair preset)',
+    async run(pool) { return setDeleteRule(pool, 'section_counts', 'chair_id', 'CASCADE') },
+  },
+  // These two are pure "who did this" attribution on someone ELSE's record
+  // (an instructor's own admin-load entry; who reviewed a load request) —
+  // safe to blank out rather than block the delete. Both columns need to be
+  // made nullable first so SET NULL has somewhere to put NULL.
+  {
+    name: 'faculty_admin_loads.chair_id nullable + ON DELETE SET NULL',
+    async run(pool) {
+      let changed = false
+      const [[nullableRow]] = await pool.query(
+        `SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'faculty_admin_loads' AND COLUMN_NAME = 'chair_id'`
+      )
+      if (nullableRow?.IS_NULLABLE === 'NO') {
+        await pool.query('ALTER TABLE faculty_admin_loads MODIFY COLUMN chair_id INT NULL')
+        changed = true
+      }
+      const ruleChanged = await setDeleteRule(pool, 'faculty_admin_loads', 'chair_id', 'SET NULL')
+      return changed || ruleChanged
+    },
+  },
+  {
+    name: 'load_requests.reviewed_by ON DELETE SET NULL',
+    async run(pool) { return setDeleteRule(pool, 'load_requests', 'reviewed_by', 'SET NULL') },
   },
 ]
 
