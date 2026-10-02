@@ -278,6 +278,36 @@ const steps = [
     name: 'load_requests.reviewed_by ON DELETE SET NULL',
     async run(pool) { return setDeleteRule(pool, 'load_requests', 'reviewed_by', 'SET NULL') },
   },
+  // users.department is free text (Manage Users has a datalist of
+  // suggestions, nothing enforces picking one), and every department-scoped
+  // feature matches it by exact string equality against the Program Chair's
+  // own account — a stray leading/trailing/doubled space is invisible in the
+  // UI but means "CEIT" and "CEIT " never match. Reported live as some
+  // instructors seeing "No prospectus uploaded" for a department that in
+  // fact has one. New accounts are cleaned at creation (see cleanDept in
+  // routes/users.js) — this is the one-time cleanup for existing rows.
+  {
+    name: 'users.department — clean up stray whitespace on existing rows',
+    async run(pool) {
+      // Compared in JS, not SQL: MySQL/MariaDB's `=`/`<>` on a non-binary
+      // VARCHAR ignores TRAILING-space-only differences (ANSI PAD SPACE
+      // behavior) and `department <> TRIM(department)` only ever reveals
+      // leading/trailing whitespace anyway — neither catches an internal
+      // run like "CE  IT", which is exactly as silent a mismatch as a
+      // leading space and was missed entirely by an earlier version of
+      // this step. An exact JS string comparison catches all three forms.
+      const [rows] = await pool.query('SELECT id, department FROM users WHERE department IS NOT NULL')
+      let changed = 0
+      for (const r of rows) {
+        const cleaned = r.department.trim().replace(/\s+/g, ' ') || null
+        if (cleaned !== r.department) {
+          await pool.query('UPDATE users SET department = ? WHERE id = ?', [cleaned, r.id])
+          changed++
+        }
+      }
+      return changed > 0
+    },
+  },
 ]
 
 export async function runMigrations(pool) {

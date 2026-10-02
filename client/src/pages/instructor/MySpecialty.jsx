@@ -121,6 +121,7 @@ function OpenToOtherDepartments() {
 }
 
 export default function MySpecialty() {
+  const { user } = useAuth()
   const [subjects, setSubjects]   = useState([])
   const [groups, setGroups]       = useState([])
   // subject id → priority (1 = first choice, 2 = second choice); presence = selected
@@ -212,6 +213,11 @@ export default function MySpecialty() {
           <BookOpen className="w-12 h-12 mb-3 opacity-30" />
           <p className="font-semibold text-gray-500">No prospectus has been uploaded yet.</p>
           <p className="text-sm mt-1">Please ask your Program Chair to upload the curriculum prospectus first.</p>
+          <p className="text-xs mt-3 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-4 py-2 max-w-md text-center">
+            If your Program Chair says one is already uploaded, this usually means your account's Department
+            (<strong>{user?.department || 'not set'}</strong>) doesn't exactly match theirs — even an extra space
+            is enough. Ask your Admin/Registrar to check it on Manage Users.
+          </p>
         </div>
       </div>
     )

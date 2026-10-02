@@ -18,6 +18,21 @@ router.get('/', authenticate, authorize('admin'), async (req, res) => {
   }
 })
 
+// Department/office is a free-text field (Manage Users has a datalist of
+// suggestions, but nothing enforces picking one), and every department-scoped
+// feature — My Specialty's prospectus lookup, Faculty Load's instructor
+// picker, building priority — matches it by exact string equality against
+// the department typed on the Program Chair/Dean's own account. A stray
+// leading/trailing space (invisible in the UI) is a real, reported cause of
+// "the instructor can't see the prospectus the chair uploaded": the chair's
+// account reads "CEIT" and the instructor's reads "CEIT " and they silently
+// never match. Collapsing to a single trimmed value at the point of entry
+// stops new accounts from drifting; see the migrate.js step for existing ones.
+function cleanDept(val) {
+  const trimmed = String(val || '').trim().replace(/\s+/g, ' ')
+  return trimmed || null
+}
+
 // Programs an instructor teaches for within their department (e.g. BSIT, BSIS,
 // or both), stored comma-separated. Empty = not restricted to any program.
 function cleanPrograms(val) {
@@ -164,11 +179,11 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
     const hash = await bcrypt.hash(password, 10)
     const [result] = await pool.query(
       'INSERT INTO users (username, password_hash, name, role, department, section, programs, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [username, hash, name, role, department || null, section || null, cleanPrograms(programs), email || null]
+      [username, hash, name, role, cleanDept(department), section || null, cleanPrograms(programs), email || null]
     )
     res.status(201).json({
       message: 'User created successfully.',
-      user: { id: result.insertId, username, name, role, department, section, programs: cleanPrograms(programs), email }
+      user: { id: result.insertId, username, name, role, department: cleanDept(department), section, programs: cleanPrograms(programs), email }
     })
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
@@ -186,12 +201,12 @@ router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
       const hash = await bcrypt.hash(password, 10)
       await pool.query(
         'UPDATE users SET name=?, role=?, department=?, section=?, programs=?, email=?, password_hash=? WHERE id=?',
-        [name, role, department || null, section || null, cleanPrograms(programs), email || null, hash, req.params.id]
+        [name, role, cleanDept(department), section || null, cleanPrograms(programs), email || null, hash, req.params.id]
       )
     } else {
       await pool.query(
         'UPDATE users SET name=?, role=?, department=?, section=?, programs=?, email=? WHERE id=?',
-        [name, role, department || null, section || null, cleanPrograms(programs), email || null, req.params.id]
+        [name, role, cleanDept(department), section || null, cleanPrograms(programs), email || null, req.params.id]
       )
     }
 
