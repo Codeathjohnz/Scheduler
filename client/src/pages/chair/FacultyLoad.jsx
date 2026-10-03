@@ -1022,7 +1022,7 @@ export default function FacultyLoad() {
       reader.onload = async (evt) => {
         try {
           const base64 = evt.target.result.split(',')[1]
-          const res = await prospectusAPI.parseDocx({ data: base64 })
+          const res = await prospectusAPI.parseDocx({ data: base64, filename: file.name })
           applyParsedSubjects(file.name, res.data.subjects, res.data.program)
         } catch (err) {
           toast.error(err.response?.data?.message || 'Failed to parse Word document.')
@@ -1036,7 +1036,7 @@ export default function FacultyLoad() {
           const ws = wb.Sheets[wb.SheetNames[0]]
           const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' })
           const text = rows.map(r => (r || []).join(' ')).join('\n')
-          prospectusAPI.detectProgram(text)
+          prospectusAPI.detectProgram(text, file.name)
             .then(d => applyParsedSubjects(file.name, parseProspectus(rows), d.data.program))
             .catch(() => applyParsedSubjects(file.name, parseProspectus(rows), null))
         } catch (err) { toast.error('Failed to read file: ' + err.message) }

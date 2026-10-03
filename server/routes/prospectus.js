@@ -95,7 +95,7 @@ router.post('/parse-docx', authenticate, authorize('chair', 'admin'), async (req
     // Read which program the document itself says it is — never trust the
     // label typed into the form for this.
     const { value: rawText } = await mammoth.extractRawText({ buffer })
-    res.json({ subjects, program: detectProspectusProgram(rawText) })
+    res.json({ subjects, program: detectProspectusProgram(rawText, req.body.filename) })
   } catch (err) {
     res.status(500).json({ message: 'Failed to parse Word document.', error: err.message })
   }
@@ -114,7 +114,7 @@ router.post('/parse-docx', authenticate, authorize('chair', 'admin'), async (req
 // POST /api/prospectus/detect-program — body: { text } — for formats the
 // client reads itself (Excel): the program named in the file's own text.
 router.post('/detect-program', authenticate, authorize('chair', 'admin'), (req, res) => {
-  res.json({ program: detectProspectusProgram(String(req.body?.text || '').slice(0, 20000)) })
+  res.json({ program: detectProspectusProgram(String(req.body?.text || '').slice(0, 20000), req.body?.filename) })
 })
 
 router.post('/parse-pdf', authenticate, authorize('chair', 'admin'), async (req, res) => {
