@@ -19,14 +19,30 @@ const TITLE_PHRASES = [
 ]
 const HEAD_CHARS = 1500
 const BODY_CAP = 20
-const CODE_RE = /\bBS[A-Za-z]{1,8}\b/g
+// A code may carry a suffix after a hyphen ("BSED-MATH"), read as one program.
+const CODE_RE = /\bBS[A-Za-z]{1,8}(?:-[A-Za-z]{2,8})?\b/g
+
+// Two program names are the same program when they match ignoring case and
+// punctuation: "BSED-MATH", "BSED MATH" and "bsedmath" all name one program.
+export function programKey(name) {
+  return String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+export function sameProgram(a, b) {
+  const ka = programKey(a)
+  return !!ka && ka === programKey(b)
+}
 
 export function detectProspectusProgram(text, filename = '') {
   const str = String(text || '')
   const head = str.slice(0, HEAD_CHARS).toUpperCase()
   const name = String(filename || '').toUpperCase()
-  const score = new Map()
-  const add = (code, points) => score.set(code, (score.get(code) || 0) + points)
+  const score = new Map()   // programKey -> points
+  const shown = new Map()   // programKey -> how the file wrote it
+  const add = (code, points) => {
+    const k = programKey(code)
+    if (!shown.has(k)) shown.set(k, code)
+    score.set(k, (score.get(k) || 0) + points)
+  }
 
   // File name: a code spelled out in it ("BSECE Prospectus.docx").
   for (const m of name.matchAll(CODE_RE)) add(m[0], 100)
@@ -45,5 +61,6 @@ export function detectProspectusProgram(text, filename = '') {
   for (const [code, n] of bodyCounts) add(code, Math.min(n, BODY_CAP))
 
   if (!score.size) return null
-  return [...score.entries()].sort((a, b) => b[1] - a[1])[0][0]
+  const best = [...score.entries()].sort((a, b) => b[1] - a[1])[0][0]
+  return shown.get(best)
 }
