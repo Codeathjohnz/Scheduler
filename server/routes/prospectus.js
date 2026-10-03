@@ -6,6 +6,12 @@ import { parseProspectusPdf } from '../utils/parseProspectusPdf.js'
 import { notifyPlaceholderMatches } from './placeholders.js'
 import { detectProspectusProgram, programKey, sameProgram } from '../utils/detectProgram.js'
 
+// The chair's own program tag(s), so detection can recognize their program by name.
+async function chairTags(userId) {
+  const [[me]] = await pool.query('SELECT programs FROM users WHERE id = ?', [userId])
+  return String(me?.programs || '').split(',').map(p => p.trim()).filter(Boolean)
+}
+
 const router = Router()
 
 // ── Word (.docx) prospectus parsing ───────────────────────────────────────────
@@ -95,7 +101,7 @@ router.post('/parse-docx', authenticate, authorize('chair', 'admin'), async (req
     // Read which program the document itself says it is — never trust the
     // label typed into the form for this.
     const { value: rawText } = await mammoth.extractRawText({ buffer })
-    res.json({ subjects, program: detectProspectusProgram(rawText, req.body.filename) })
+    res.json({ subjects, program: detectProspectusProgram(rawText, req.body.filename, await chairTags(req.user.id)) })
   } catch (err) {
     res.status(500).json({ message: 'Failed to parse Word document.', error: err.message })
   }
@@ -113,8 +119,8 @@ router.post('/parse-docx', authenticate, authorize('chair', 'admin'), async (req
 // editable preview for this path, not the read-only one used for xlsx/docx.
 // POST /api/prospectus/detect-program — body: { text } — for formats the
 // client reads itself (Excel): the program named in the file's own text.
-router.post('/detect-program', authenticate, authorize('chair', 'admin'), (req, res) => {
-  res.json({ program: detectProspectusProgram(String(req.body?.text || '').slice(0, 20000), req.body?.filename) })
+router.post('/detect-program', authenticate, authorize('chair', 'admin'), async (req, res) => {
+  res.json({ program: detectProspectusProgram(String(req.body?.text || '').slice(0, 20000), req.body?.filename, await chairTags(req.user.id)) })
 })
 
 router.post('/parse-pdf', authenticate, authorize('chair', 'admin'), async (req, res) => {
