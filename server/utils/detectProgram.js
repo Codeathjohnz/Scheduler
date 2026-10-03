@@ -32,7 +32,15 @@ export function sameProgram(a, b) {
   return !!ka && ka === programKey(b)
 }
 
-export function detectProspectusProgram(text, filename = '') {
+// Whole-word containment on normalized text: "ABEL" is in "ABEL.docx" and
+// "BSED-MATH" is in "BSED MATH Prospectus", but "ABEL" is not in "CABELLA".
+const wordsOf = (s) => ' ' + String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim() + ' '
+const names = (text, tag) => wordsOf(text).includes(wordsOf(tag))
+
+// `known` is the chair's own program tag(s). Their names count as strong
+// evidence even when they aren't BS-coded, e.g. a chair tagged "ABEL".
+export function detectProspectusProgram(text, filename = '', known = []) {
+  const knownTags = (known || []).map(t => String(t || '').trim()).filter(Boolean)
   const str = String(text || '')
   const head = str.slice(0, HEAD_CHARS).toUpperCase()
   const name = String(filename || '').toUpperCase()
@@ -44,11 +52,14 @@ export function detectProspectusProgram(text, filename = '') {
     score.set(k, (score.get(k) || 0) + points)
   }
 
-  // File name: a code spelled out in it ("BSECE Prospectus.docx").
+  // File name: a code spelled out in it ("BSECE Prospectus.docx"), or one of
+  // the chair's own program names.
+  for (const tag of knownTags) if (names(name, tag)) add(tag, 100)
   for (const m of name.matchAll(CODE_RE)) add(m[0], 100)
   for (const [phrase, code] of TITLE_PHRASES) if (name.includes(phrase)) add(code, 100)
 
   // Header/title area: a code or program title near the top of the document.
+  for (const tag of knownTags) if (names(head, tag)) add(tag, 60)
   for (const code of new Set([...head.matchAll(CODE_RE)].map(m => m[0]))) add(code, 30)
   for (const [phrase, code] of TITLE_PHRASES) if (head.includes(phrase)) add(code, 100)
 
