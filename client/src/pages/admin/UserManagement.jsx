@@ -155,6 +155,7 @@ export default function UserManagement() {
   const [saving, setSaving]       = useState(false)
   const [search, setSearch]       = useState('')
   const [filterRole, setFilterRole] = useState('all')
+  const [filterDept, setFilterDept] = useState('all')
   const [showModal, setShowModal] = useState(false)
   const [editUser, setEditUser]   = useState(null)   // null = create mode
   const [form, setForm]           = useState(EMPTY_FORM)
@@ -266,13 +267,17 @@ export default function UserManagement() {
   const departmentMismatch = (u) =>
     ['instructor', 'chair', 'dean'].includes(u.role) && u.department && !chairDepts.has(u.department.trim())
 
+  // One button per department, so e.g. CCIS shows only CCIS users.
+  const departments = [...new Set(users.map(u => (u.department || '').trim()).filter(Boolean))].sort()
+
   const filtered = users.filter(u => {
+    const matchDept   = filterDept === 'all' || (u.department || '').trim() === filterDept
     const matchRole   = filterRole === 'all' || u.role === filterRole
     const matchSearch = search === '' ||
       u.name.toLowerCase().includes(search.toLowerCase()) ||
       u.username.toLowerCase().includes(search.toLowerCase()) ||
       (u.department || '').toLowerCase().includes(search.toLowerCase())
-    return matchRole && matchSearch
+    return matchDept && matchRole && matchSearch
   })
 
   const needsSection = form.role === 'student'
@@ -304,6 +309,21 @@ export default function UserManagement() {
           )
         })}
       </div>
+
+      {/* Department filter */}
+      {departments.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {['all', ...departments].map(d => {
+            const on = filterDept === d
+            return (
+              <button key={d} onClick={() => setFilterDept(d)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${on ? 'bg-green-700 border-green-700 text-white' : 'bg-white border-gray-300 text-gray-600 hover:border-green-500'}`}>
+                {d === 'all' ? 'All departments' : d}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {/* Search & filter */}
       <div className="flex gap-3 mb-4">
