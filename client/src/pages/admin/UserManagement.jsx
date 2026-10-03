@@ -254,6 +254,18 @@ export default function UserManagement() {
     }
   }
 
+  // Department is free text (the datalist below is only a suggestion), and
+  // every department-scoped feature — My Specialty's prospectus lookup,
+  // Faculty Load's instructor picker — matches it by exact string equality
+  // against the Program Chair/Dean's own account. A typo here is invisible
+  // in this list otherwise and shows up live as "the instructor can't see
+  // the prospectus the chair uploaded" or "no specialties to pick."
+  const chairDepts = new Set(
+    users.filter(u => ['chair', 'dean'].includes(u.role) && u.department).map(u => u.department.trim())
+  )
+  const departmentMismatch = (u) =>
+    ['instructor', 'chair', 'dean'].includes(u.role) && u.department && !chairDepts.has(u.department.trim())
+
   const filtered = users.filter(u => {
     const matchRole   = filterRole === 'all' || u.role === filterRole
     const matchSearch = search === '' ||
@@ -361,6 +373,12 @@ export default function UserManagement() {
                     <td className="px-5 py-3 text-gray-500 text-xs">
                       {u.department || '—'}
                       {u.section && <span className="ml-1 text-green-600 font-medium">· {u.section}</span>}
+                      {departmentMismatch(u) && (
+                        <span title={`No Program Chair or Dean has "${u.department}" exactly — check for a typo or extra space against their department (e.g. "CEIT"). Until it matches exactly, this person won't see that department's prospectus or specialties.`}
+                          className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 cursor-help">
+                          ⚠ No matching chair
+                        </span>
+                      )}
                       {(u.role === 'instructor' || u.role === 'chair') && (
                         <div className="flex flex-wrap gap-1 mt-1">
                           {splitPrograms(u.programs).length > 0
