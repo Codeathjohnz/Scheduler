@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import PageHeader from '../../components/ui/PageHeader.jsx'
-import { roomsAPI, buildingPriorityAPI } from '../../services/api.js'
+import { roomsAPI, buildingPriorityAPI, usersAPI } from '../../services/api.js'
 import toast from 'react-hot-toast'
 import {
   Plus, Trash2, X, Loader2, DoorOpen, FlaskConical, MonitorPlay, Accessibility,
@@ -103,6 +103,12 @@ export default function AdminRooms() {
   const [loading, setLoading]   = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [form, setForm]         = useState(EMPTY_FORM)
+  // "Restrict To" is picked, not typed: colleges (departments) and the
+  // programs inside them. Saved as the same comma-separated list as before.
+  const [deptOptions, setDeptOptions]         = useState([])
+  const [progOptions, setProgOptions]         = useState([])
+  const [restrictDepts, setRestrictDepts]     = useState([])
+  const [restrictPrograms, setRestrictPrograms] = useState([])
   const [editingId, setEditingId] = useState(null)   // null = Add mode, else editing this room's id
   const [saving, setSaving]     = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
@@ -110,6 +116,20 @@ export default function AdminRooms() {
   const [filterBuilding, setFilterBuilding] = useState(null)   // null = every building
 
   const [priorities, setPriorities]     = useState({})
+
+  useEffect(() => {
+    usersAPI.getAll().then(r => {
+      const depts = new Set(r.data.filter(u => u.department && u.role !== 'student').map(u => u.department.trim()))
+      setDeptOptions([...depts].sort())
+    }).catch(() => setDeptOptions([]))
+  }, [])
+
+  // Programs offered by the picked colleges, from their prospectuses and tags.
+  useEffect(() => {
+    if (!restrictDepts.length) { setProgOptions([]); return }
+    Promise.all(restrictDepts.map(d => usersAPI.getProgramOptions(d).then(r => r.data).catch(() => [])))
+      .then(lists => setProgOptions([...new Set(lists.flat())].sort()))
+  }, [restrictDepts])
   const [editingBuilding, setEditingBuilding] = useState(null)
   const [draftPrograms, setDraftPrograms]     = useState([])
   const [newProgram, setNewProgram]           = useState('')
@@ -186,7 +206,18 @@ export default function AdminRooms() {
     }
   }
 
-  const openAdd = () => { setForm(EMPTY_FORM); setEditingId(null); setShowModal(true) }
+  const openAdd = () => {
+    setForm(EMPTY_FORM); setEditingId(null)
+    setRestrictDepts([]); setRestrictPrograms([])
+    setShowModal(true)
+  }
+
+  // Keeps the saved string and the picker in step.
+  const setRestriction = (depts, progs) => {
+    setRestrictDepts(depts); setRestrictPrograms(progs)
+    setForm(f => ({ ...f, program_restriction: [...depts, ...progs].join(',') }))
+  }
+  const toggleIn = (list, value) => list.includes(value) ? list.filter(v => v !== value) : [...list, value]
   const openEdit = (room) => {
     setForm({
       building:      room.building,
@@ -197,6 +228,10 @@ export default function AdminRooms() {
       is_accessible: !!room.is_accessible,
       program_restriction: room.program_restriction || '',
     })
+    const saved = String(room.program_restriction || '').split(',').map(x => x.trim()).filter(Boolean)
+    const knownDepts = new Set(deptOptions.map(d => d.toUpperCase()))
+    setRestrictDepts(saved.filter(x => knownDepts.has(x.toUpperCase())))
+    setRestrictPrograms(saved.filter(x => !knownDepts.has(x.toUpperCase())))
     setEditingId(room.id)
     setShowModal(true)
   }
@@ -561,18 +596,39 @@ export default function AdminRooms() {
                 <label className="block text-xs font-semibold text-gray-600 mb-1">
                   Restrict To (optional)
                 </label>
-                <input
-                  list="room-program-list"
-                  value={form.program_restriction}
-                  onChange={e => setForm(f => ({ ...f, program_restriction: e.target.value }))}
-                  placeholder="e.g. CCIS, BSIT, BSIS — blank = open to everyone"
-                  className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-green-500"
-                />
-                <datalist id="room-program-list">
-                  {PROGRAM_SUGGESTIONS.map(p => <option key={p} value={p} />)}
-                </datalist>
-                <p className="text-xs text-gray-400 mt-1">
-                  Comma-separated programs or departments allowed to use this room. Leave blank to keep it open to all.
+                <p className="text-xs text-gray-500 mb-2">Colleges</p>
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {deptOptions.length === 0 && <span className="text-xs text-gray-400">No colleges found yet.</span>}
+                  {deptOptions.map(d => {
+                    const on = restrictDepts.includes(d)
+                    return (
+                      <button key={d} type="button" onClick={() => setRestriction(toggleIn(restrictDepts, d), restrictPrograms)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${on ? 'bg-green-700 border-green-700 text-white' : 'bg-white border-gray-300 text-gray-700 hover:border-green-500'}`}>
+                        {on && '✓ '}{d}
+                      </button>
+                    )
+                  })}
+                </div>
+                {progOptions.length > 0 && (
+                  <>
+                    <p className="text-xs text-gray-500 mb-2">Programs in those colleges (optional — pick to narrow further)</p>
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {progOptions.map(p => {
+                        const on = restrictPrograms.includes(p)
+                        return (
+                          <button key={p} type="button" onClick={() => setRestriction(restrictDepts, toggleIn(restrictPrograms, p))}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${on ? 'bg-blue-700 border-blue-700 text-white' : 'bg-white border-gray-300 text-gray-700 hover:border-blue-500'}`}>
+                            {on && '✓ '}{p}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </>
+                )}
+                <p className="text-xs text-gray-400">
+                  {restrictDepts.length || restrictPrograms.length
+                    ? <>Only <strong className="text-gray-600">{[...restrictDepts, ...restrictPrograms].join(', ')}</strong> can use this room.</>
+                    : 'Nothing picked — open to everyone.'}
                 </p>
               </div>
 
