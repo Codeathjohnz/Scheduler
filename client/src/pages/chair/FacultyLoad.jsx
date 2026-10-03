@@ -854,7 +854,10 @@ export default function FacultyLoad() {
   const [expandedGroups, setExpandedGroups] = useState({})
   const [importing, setImporting]         = useState(false)
   const [academicYear, setAcademicYear]   = useState('2022-2023')
-  const [programName, setProgramName]     = useState('BSIT')
+  // Default to this chair's own program (set by the Admin on their account,
+  // e.g. BSECE) instead of a hardcoded 'BSIT' — otherwise every prospectus
+  // imports under BSIT no matter whose it is. Still editable on the form.
+  const [programName, setProgramName]     = useState(() => String(user?.programs || '').split(',')[0].trim() || 'BSIT')
   const [viewId, setViewId]               = useState(null)
   const [viewSubjects, setViewSubjects]   = useState([])
   const [viewGroups, setViewGroups]       = useState([])
