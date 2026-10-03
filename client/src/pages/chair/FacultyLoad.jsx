@@ -997,11 +997,16 @@ export default function FacultyLoad() {
   }
 
   /* ── Prospectus handlers ── */
-  const applyParsedSubjects = (filename, subjects) => {
+  // The program label comes from what the file itself says (detected), not
+  // a form default. Falls back to the chair's own account tag only when the
+  // file names no program at all.
+  const chairProgram = String(user?.programs || '').split(',')[0].trim()
+  const applyParsedSubjects = (filename, subjects, detected) => {
     if (!subjects.length) { toast.error('No subjects found.'); return }
     const groups = groupSubjects(subjects)
     const exp = {}; groups.forEach(g => { exp[`${g.year_level}-${g.semester}`] = true })
-    setPreview({ filename, subjects, groups })
+    setPreview({ filename, subjects, groups, detected: detected || null })
+    setProgramName(detected || chairProgram || programName)
     setExpandedGroups(exp)
     toast.success(`Parsed ${subjects.length} subjects`)
   }
@@ -1018,7 +1023,7 @@ export default function FacultyLoad() {
         try {
           const base64 = evt.target.result.split(',')[1]
           const res = await prospectusAPI.parseDocx({ data: base64 })
-          applyParsedSubjects(file.name, res.data.subjects)
+          applyParsedSubjects(file.name, res.data.subjects, res.data.program)
         } catch (err) {
           toast.error(err.response?.data?.message || 'Failed to parse Word document.')
         }
@@ -1030,7 +1035,10 @@ export default function FacultyLoad() {
           const wb = XLSX.read(evt.target.result, { type:'array' })
           const ws = wb.Sheets[wb.SheetNames[0]]
           const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' })
-          applyParsedSubjects(file.name, parseProspectus(rows))
+          const text = rows.map(r => (r || []).join(' ')).join('\n')
+          prospectusAPI.detectProgram(text)
+            .then(d => applyParsedSubjects(file.name, parseProspectus(rows), d.data.program))
+            .catch(() => applyParsedSubjects(file.name, parseProspectus(rows), null))
         } catch (err) { toast.error('Failed to read file: ' + err.message) }
       }
       reader.readAsArrayBuffer(file)
@@ -1041,7 +1049,7 @@ export default function FacultyLoad() {
   const handleImport = async () => {
     if (!preview) return; setImporting(true)
     try {
-      const r = await prospectusAPI.import({ program: programName, academic_year: academicYear, filename: preview.filename, subjects: preview.subjects })
+      const r = await prospectusAPI.import({ program: programName, detected_program: preview.detected, academic_year: academicYear, filename: preview.filename, subjects: preview.subjects })
       toast.success(`Imported ${r.data.count} subjects!`); setPreview(null); fetchProspectuses()
     } catch (err) { toast.error(err.response?.data?.message || 'Import failed.') }
     finally { setImporting(false) }
@@ -1321,6 +1329,21 @@ export default function FacultyLoad() {
                 <button onClick={()=>setPreview(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
               </div>
               <div className="px-6 py-4 border-b flex flex-wrap gap-4 items-end">
+                {preview.detected && (
+                  <div className="w-full text-xs rounded-lg px-3 py-2 bg-green-50 border border-green-200 text-green-800">
+                    The file names its program as <strong>{preview.detected}</strong>.
+                    {chairProgram && preview.detected.toUpperCase() !== chairProgram.toUpperCase() && (
+                      <span className="block mt-1 font-semibold text-red-700">
+                        ⚠ Your account chairs {chairProgram}. This prospectus can't be imported here — check the file, or ask the Admin to correct your Program tag on Manage Users.
+                      </span>
+                    )}
+                  </div>
+                )}
+                {!preview.detected && (
+                  <div className="w-full text-xs rounded-lg px-3 py-2 bg-amber-50 border border-amber-200 text-amber-800">
+                    The file doesn't name a program. Confirm the Program below before importing.
+                  </div>
+                )}
                 {[['Program',programName,setProgramName,'w-32'],['Academic Year',academicYear,setAcademicYear,'w-40']].map(([label,val,set,w])=>(
                   <div key={label}>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>

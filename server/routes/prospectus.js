@@ -4,6 +4,7 @@ import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { parseProspectusPdf } from '../utils/parseProspectusPdf.js'
 import { notifyPlaceholderMatches } from './placeholders.js'
+import { detectProspectusProgram } from '../utils/detectProgram.js'
 
 const router = Router()
 
@@ -91,7 +92,10 @@ router.post('/parse-docx', authenticate, authorize('chair', 'admin'), async (req
     if (!subjects.length) {
       return res.status(400).json({ message: 'No subjects found. Make sure each year level/semester is in its own table with a "{YEAR} YEAR {N} SEMESTER" heading.' })
     }
-    res.json({ subjects })
+    // Read which program the document itself says it is — never trust the
+    // label typed into the form for this.
+    const { value: rawText } = await mammoth.extractRawText({ buffer })
+    res.json({ subjects, program: detectProspectusProgram(rawText) })
   } catch (err) {
     res.status(500).json({ message: 'Failed to parse Word document.', error: err.message })
   }
@@ -107,6 +111,12 @@ router.post('/parse-docx', authenticate, authorize('chair', 'admin'), async (req
 // flag where the parser itself couldn't read it at all, but a false "clean"
 // row is NOT a guarantee the numbers are right. The client must show an
 // editable preview for this path, not the read-only one used for xlsx/docx.
+// POST /api/prospectus/detect-program — body: { text } — for formats the
+// client reads itself (Excel): the program named in the file's own text.
+router.post('/detect-program', authenticate, authorize('chair', 'admin'), (req, res) => {
+  res.json({ program: detectProspectusProgram(String(req.body?.text || '').slice(0, 20000)) })
+})
+
 router.post('/parse-pdf', authenticate, authorize('chair', 'admin'), async (req, res) => {
   const { data } = req.body
   if (!data) {
@@ -302,10 +312,31 @@ router.get('/:id/subjects', authenticate, async (req, res) => {
 
 // POST /api/prospectus  — chair imports a prospectus (subjects parsed on client)
 router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => {
-  const { program, academic_year, filename, subjects } = req.body
+  const { program, academic_year, filename, subjects, detected_program } = req.body
 
   if (!subjects || !Array.isArray(subjects) || subjects.length === 0) {
     return res.status(400).json({ message: 'No subjects provided.' })
+  }
+
+  // The program a prospectus is filed under comes from the chair's own
+  // account tag (users.programs), never a default. If the file itself names
+  // a different program than the one this chair chairs, refuse — that's a
+  // wrong file or a wrong account tag, and an admin needs to look at it.
+  const [[me]] = await pool.query('SELECT programs FROM users WHERE id = ?', [req.user.id])
+  const tags = String(me?.programs || '').split(',').map(p => p.trim()).filter(Boolean)
+  const upper = (x) => String(x || '').trim().toUpperCase()
+  let label = program ? String(program).trim() : ''
+  if (tags.length) {
+    if (!label) label = tags[0]
+    if (!tags.some(t => upper(t) === upper(label))) {
+      return res.status(400).json({ message: `Your account chairs ${tags.join(', ')}, but this prospectus is labeled ${label}. Pick ${tags.join(' or ')}, or ask the Admin to correct your Program tag on Manage Users.` })
+    }
+  }
+  if (detected_program && upper(detected_program) !== upper(label)) {
+    return res.status(400).json({ message: `This file reads as ${detected_program}, not ${label}. Check you uploaded the right prospectus — if the file is correct, ask the Admin to correct your Program tag on Manage Users.` })
+  }
+  if (!label) {
+    return res.status(400).json({ message: 'Your account has no program set. Ask the Admin to set the Program you chair on Manage Users first.' })
   }
 
   const conn = await pool.getConnection()
@@ -314,7 +345,7 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
 
     const [pResult] = await conn.query(
       'INSERT INTO prospectus (program, academic_year, filename, uploaded_by) VALUES (?, ?, ?, ?)',
-      [program || 'BSIT', academic_year || null, filename || null, req.user.id]
+      [label, academic_year || null, filename || null, req.user.id]
     )
     const prospectusId = pResult.insertId
 
