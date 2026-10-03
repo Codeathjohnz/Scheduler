@@ -557,9 +557,11 @@ export default function UserManagement() {
                 </label>
                 <input
                   type="email"
+                  pattern="[a-zA-Z0-9._\-]+@adssu\.edu\.ph"
+                  title="Institutional email only: name@adssu.edu.ph"
                   value={form.email}
                   onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                  placeholder="e.g. juan.delacruz@email.com"
+                  placeholder="e.g. juan.delacruz@adssu.edu.ph"
                   className="w-full border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-green-500 transition"
                 />
               </div>

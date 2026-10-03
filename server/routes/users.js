@@ -28,6 +28,20 @@ router.get('/', authenticate, authorize('admin'), async (req, res) => {
 // account reads "CEIT" and the instructor's reads "CEIT " and they silently
 // never match. Collapsing to a single trimmed value at the point of entry
 // stops new accounts from drifting; see the migrate.js step for existing ones.
+// Accounts are institutional: the only email accepted is one at adssu.edu.ph
+// (e.g. name@adssu.edu.ph). Empty is allowed here — the caller decides whether
+// it's required. Returns { email, error }.
+const INSTITUTIONAL_DOMAIN = '@adssu.edu.ph'
+function checkEmail(val) {
+  const email = String(val || '').trim().toLowerCase()
+  if (!email) return { email: null, error: null }
+  const local = email.slice(0, -INSTITUTIONAL_DOMAIN.length)
+  if (!email.endsWith(INSTITUTIONAL_DOMAIN) || !/^[a-z0-9._-]+$/.test(local)) {
+    return { email: null, error: 'Use an institutional email only, e.g. juan.delacruz@adssu.edu.ph.' }
+  }
+  return { email, error: null }
+}
+
 function cleanDept(val) {
   const trimmed = String(val || '').trim().replace(/\s+/g, ' ')
   return trimmed || null
@@ -166,6 +180,8 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
   if (!username || !password || !name || !role) {
     return res.status(400).json({ message: 'Username, password, name, and role are required.' })
   }
+  const mail = checkEmail(email)
+  if (mail.error) return res.status(400).json({ message: mail.error })
 
   const validRoles = ['admin', 'chair', 'vpaa', 'instructor', 'student', 'dean', 'quality_assurance', 'chief_cpd']
   if (!validRoles.includes(role)) {
@@ -179,11 +195,11 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
     const hash = await bcrypt.hash(password, 10)
     const [result] = await pool.query(
       'INSERT INTO users (username, password_hash, name, role, department, section, programs, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [username, hash, name, role, cleanDept(department), section || null, cleanPrograms(programs), email || null]
+      [username, hash, name, role, cleanDept(department), section || null, cleanPrograms(programs), mail.email]
     )
     res.status(201).json({
       message: 'User created successfully.',
-      user: { id: result.insertId, username, name, role, department: cleanDept(department), section, programs: cleanPrograms(programs), email }
+      user: { id: result.insertId, username, name, role, department: cleanDept(department), section, programs: cleanPrograms(programs), email: mail.email }
     })
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
@@ -193,6 +209,8 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
 // PUT update user (admin only)
 router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
   const { name, role, department, section, email, password, programs } = req.body
+  const mail = checkEmail(email)
+  if (mail.error) return res.status(400).json({ message: mail.error })
   try {
     const [[user]] = await pool.query('SELECT id FROM users WHERE id = ?', [req.params.id])
     if (!user) return res.status(404).json({ message: 'User not found.' })
@@ -201,12 +219,12 @@ router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
       const hash = await bcrypt.hash(password, 10)
       await pool.query(
         'UPDATE users SET name=?, role=?, department=?, section=?, programs=?, email=?, password_hash=? WHERE id=?',
-        [name, role, cleanDept(department), section || null, cleanPrograms(programs), email || null, hash, req.params.id]
+        [name, role, cleanDept(department), section || null, cleanPrograms(programs), mail.email, hash, req.params.id]
       )
     } else {
       await pool.query(
         'UPDATE users SET name=?, role=?, department=?, section=?, programs=?, email=? WHERE id=?',
-        [name, role, cleanDept(department), section || null, cleanPrograms(programs), email || null, req.params.id]
+        [name, role, cleanDept(department), section || null, cleanPrograms(programs), mail.email, req.params.id]
       )
     }
 
