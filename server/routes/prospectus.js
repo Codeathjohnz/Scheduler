@@ -4,7 +4,7 @@ import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { parseProspectusPdf } from '../utils/parseProspectusPdf.js'
 import { notifyPlaceholderMatches } from './placeholders.js'
-import { detectProspectusProgram } from '../utils/detectProgram.js'
+import { detectProspectusProgram, programKey, sameProgram } from '../utils/detectProgram.js'
 
 const router = Router()
 
@@ -235,7 +235,7 @@ async function departmentSubjects(department, semester, programs = []) {
   // than left for the instructor to (wrongly) pick as their specialty.
   const major = rows.filter(s => !isGeneralEd(s.course_code) && !isPathfit(s.course_code) && !isNstp(s.course_code))
   const scoped = programs.length
-    ? major.filter(s => !s.prospectus_program || programs.includes(String(s.prospectus_program).trim().toUpperCase()))
+    ? major.filter(s => !s.prospectus_program || programs.includes(programKey(s.prospectus_program)))
     : major
   return scoped.map(({ prospectus_program, ...rest }) => rest)
 }
@@ -290,7 +290,7 @@ router.get('/latest/subjects', authenticate, async (req, res) => {
     }
 
     const [[me]] = await pool.query('SELECT programs FROM users WHERE id = ?', [req.user.id])
-    const programs = String(me?.programs || '').split(',').map(p => p.trim().toUpperCase()).filter(Boolean)
+    const programs = String(me?.programs || '').split(',').map(programKey).filter(Boolean)
     res.json(await departmentSubjects(req.user.department, semester, programs))
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
@@ -324,15 +324,14 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
   // wrong file or a wrong account tag, and an admin needs to look at it.
   const [[me]] = await pool.query('SELECT programs FROM users WHERE id = ?', [req.user.id])
   const tags = String(me?.programs || '').split(',').map(p => p.trim()).filter(Boolean)
-  const upper = (x) => String(x || '').trim().toUpperCase()
   let label = program ? String(program).trim() : ''
   if (tags.length) {
     if (!label) label = tags[0]
-    if (!tags.some(t => upper(t) === upper(label))) {
+    if (!tags.some(t => sameProgram(t, label))) {
       return res.status(400).json({ message: `Your account chairs ${tags.join(', ')}, but this prospectus is labeled ${label}. Pick ${tags.join(' or ')}, or ask the Admin to correct your Program tag on Manage Users.` })
     }
   }
-  if (detected_program && upper(detected_program) !== upper(label)) {
+  if (detected_program && !sameProgram(detected_program, label)) {
     return res.status(400).json({ message: `This file reads as ${detected_program}, not ${label}. Check you uploaded the right prospectus — if the file is correct, ask the Admin to correct your Program tag on Manage Users.` })
   }
   if (!label) {

@@ -3,6 +3,7 @@ import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { generateFacultyLoadingDocx } from '../utils/facultyLoadingDocx.js'
 import { hasDeptGrant, grantedDepartments } from '../utils/deptAccess.js'
+import { programKey } from '../utils/detectProgram.js'
 import { notify } from '../utils/notify.js'
 
 const router = Router()
@@ -152,8 +153,8 @@ async function programMismatchProblem(instructorId, subjectId) {
     `SELECT p.program FROM prospectus_subjects ps LEFT JOIN prospectus p ON p.id = ps.prospectus_id WHERE ps.id = ?`, [subjectId]
   )
   if (!inst || !subj?.program || !inst.programs) return null
-  const allowed = inst.programs.split(',').map(p => p.trim().toUpperCase())
-  if (allowed.includes(subj.program.trim().toUpperCase())) return null
+  const allowed = inst.programs.split(',').map(programKey)
+  if (allowed.includes(programKey(subj.program))) return null
   return `${inst.name} teaches for ${inst.programs} — this subject belongs to the ${subj.program} prospectus. Pick an instructor tagged for ${subj.program} (My Specialty), or untag them from ${inst.programs} first if that's wrong.`
 }
 
@@ -687,8 +688,8 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
     // programs; untagged instructors stay eligible for every program in the
     // department, as before.
     const teachesProgram = (i) => {
-      const list = String(i.programs || '').split(',').map(p => p.trim().toUpperCase()).filter(Boolean)
-      return !list.length || list.includes(String(program || '').trim().toUpperCase())
+      const list = String(i.programs || '').split(',').map(programKey).filter(Boolean)
+      return !list.length || list.includes(programKey(program))
     }
     const majorInstructorIds   = instructors.filter(i =>
       i.department !== 'General Education' && i.department !== 'PATHFIT' && i.department !== 'NSTP' && teachesProgram(i)

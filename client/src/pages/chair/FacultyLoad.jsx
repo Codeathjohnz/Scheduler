@@ -842,6 +842,9 @@ function PdfPreviewPanel({ preview, programName, setProgramName, academicYear, s
 }
 
 /* ─── MAIN PAGE ─────────────────────────────────────────────── */
+// Program names match ignoring case and punctuation: BSED-MATH = BSED MATH.
+const programKey = (name) => String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+
 export default function FacultyLoad() {
   const { user } = useAuth()
   const [tab, setTab] = useState('loading')   // 'prospectus' | 'loading'
@@ -1332,7 +1335,7 @@ export default function FacultyLoad() {
                 {preview.detected && (
                   <div className="w-full text-xs rounded-lg px-3 py-2 bg-green-50 border border-green-200 text-green-800">
                     The file names its program as <strong>{preview.detected}</strong>.
-                    {chairProgram && preview.detected.toUpperCase() !== chairProgram.toUpperCase() && (
+                    {chairProgram && programKey(preview.detected) !== programKey(chairProgram) && (
                       <span className="block mt-1 font-semibold text-red-700">
                         ⚠ Your account chairs {chairProgram}. This prospectus can't be imported here — check the file, or ask the Admin to correct your Program tag on Manage Users.
                       </span>
