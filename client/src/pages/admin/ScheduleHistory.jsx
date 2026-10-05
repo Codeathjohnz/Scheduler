@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import { schedulingAPI } from '../../services/api.js'
-import { History, Loader2 } from 'lucide-react'
+import { History, Loader2, Building2, Users } from 'lucide-react'
+import ScheduleGroups from '../../components/common/ScheduleGroups.jsx'
 
 const SEM = { 1: '1st Semester', 2: '2nd Semester', 3: 'Summer' }
 
@@ -13,6 +14,20 @@ const SEM = { 1: '1st Semester', 2: '2nd Semester', 3: 'Summer' }
 export default function ScheduleHistory() {
   const [rows, setRows]       = useState([])
   const [loading, setLoading] = useState(true)
+  // Existing schedules, for reference: which rooms and times are already taken.
+  const [viewYear, setViewYear] = useState('2026-2027')
+  const [viewSem, setViewSem]   = useState(1)
+  const [viewMode, setViewMode] = useState('building')
+  const [schedRows, setSchedRows] = useState([])
+  const [schedLoading, setSchedLoading] = useState(false)
+
+  useEffect(() => {
+    setSchedLoading(true)
+    schedulingAPI.getAll(viewYear, viewSem)
+      .then(r => setSchedRows(r.data.schedules || []))
+      .catch(() => { setSchedRows([]); toast.error('Could not load the schedules for that term.') })
+      .finally(() => setSchedLoading(false))
+  }, [viewYear, viewSem])
 
   useEffect(() => {
     schedulingAPI.history()
@@ -36,6 +51,41 @@ export default function ScheduleHistory() {
         title="Transaction History"
         subtitle="Published schedules, by term and department. A published term is final."
       />
+
+      <section className="mb-8">
+        <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">Schedules in the system</h2>
+        <div className="flex flex-wrap items-end gap-3 mb-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Academic year</label>
+            <input value={viewYear} onChange={e => setViewYear(e.target.value)}
+              className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500 w-40" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Semester</label>
+            <select value={viewSem} onChange={e => setViewSem(Number(e.target.value))}
+              className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-green-500">
+              {Object.entries(SEM).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div className="ml-auto flex border-2 border-gray-200 rounded-xl overflow-hidden">
+            <button onClick={() => setViewMode('building')}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold ${viewMode === 'building' ? 'bg-green-700 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+              <Building2 className="w-3.5 h-3.5" /> By building
+            </button>
+            <button onClick={() => setViewMode('instructor')}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold ${viewMode === 'instructor' ? 'bg-green-700 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+              <Users className="w-3.5 h-3.5" /> By instructor
+            </button>
+          </div>
+        </div>
+        {schedLoading ? (
+          <div className="flex items-center justify-center py-12 text-gray-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
+        ) : schedRows.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-200 py-12 text-center text-sm text-gray-400">No schedule exists for this term yet.</div>
+        ) : (
+          <ScheduleGroups rows={schedRows} mode={viewMode} />
+        )}
+      </section>
 
       {loading ? (
         <div className="flex items-center justify-center py-24 text-gray-400"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading…</div>
