@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { laneLayout } from '../../utils/timetableLayout.js'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import { schedulingAPI } from '../../services/api.js'
 import { useAuth } from '../../context/AuthContext.jsx'
@@ -35,14 +36,14 @@ function subjectColor(code) {
 }
 
 /* ── timetable block ─────────────────────────────────────────────────────── */
-function Block({ slot }) {
+function Block({ slot, lane = { col: 0, cols: 1 } }) {
   const colors = subjectColor(slot.course_code)
   const top    = (timeToMin(slot.start_time) - GRID_START) * PX_PER_MIN
   const height = (timeToMin(slot.end_time) - timeToMin(slot.start_time)) * PX_PER_MIN - 2
 
   return (
-    <div className="absolute left-0.5 right-0.5 rounded-lg px-1.5 py-1 overflow-hidden"
-      style={{ top, height, minHeight: 24, background: colors.bg, borderLeft: `3px solid ${colors.border}` }}
+    <div className="absolute rounded-lg px-1.5 py-1 overflow-hidden"
+      style={{ top, height, minHeight: 24, left: `calc(${lane.col / lane.cols * 100}% + 2px)`, width: `calc(${100 / lane.cols}% - 4px)`, background: colors.bg, borderLeft: `3px solid ${colors.border}` }}
       title={`${slot.course_code} — ${slot.instructor_name || 'TBA'}\n${slot.room_name || 'No room'}\n${fmt12(slot.start_time)} – ${fmt12(slot.end_time)}`}
     >
       <p className="font-bold text-[10px] leading-tight truncate" style={{ color: colors.text }}>{slot.course_code}</p>
@@ -177,7 +178,7 @@ export default function StudentSchedule() {
                       style={{ top: (720 - GRID_START) * PX_PER_MIN, height: 60 * PX_PER_MIN }} />
                     {/* Blocks */}
                     {byDay[day].map(slot => (
-                      <Block key={`${slot.id}-${day}`} slot={slot} />
+                      <Block key={`${slot.id}-${day}`} slot={slot} lane={laneLayout(byDay[day]).get(slot)} />
                     ))}
                   </div>
                 ))}

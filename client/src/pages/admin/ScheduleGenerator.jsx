@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { laneLayout } from '../../utils/timetableLayout.js'
 import toast from 'react-hot-toast'
 import api from '../../services/api.js'
 import PageHeader from '../../components/ui/PageHeader.jsx'
@@ -161,15 +162,15 @@ function EditModal({ slot, rooms, onSave, onClose }) {
 }
 
 /* ── timetable block ────────────────────────────────────────────────────────── */
-function ScheduleBlock({ slot, onEdit }) {
+function ScheduleBlock({ slot, lane = { col: 0, cols: 1 }, onEdit }) {
   const colors = strColor(slot.instructor_name || slot.program_yr_sec || '')
   const top    = (timeToMin(slot.start_time) - GRID_START) * PX_PER_MIN
   const height = (timeToMin(slot.end_time) - timeToMin(slot.start_time)) * PX_PER_MIN - 2
 
   return (
     <div
-      className={`absolute left-0.5 right-0.5 rounded-lg px-1.5 py-1 overflow-hidden cursor-pointer group transition hover:shadow-md ${slot.hasConflict?'ring-2 ring-red-500':''}`}
-      style={{ top, height, minHeight:24, background: colors.bg, borderLeft: `3px solid ${colors.border}` }}
+      className={`absolute rounded-lg px-1.5 py-1 overflow-hidden cursor-pointer group transition hover:shadow-md ${slot.hasConflict?'ring-2 ring-red-500':''}`}
+      style={{ top, height, minHeight: 24, left: `calc(${lane.col / lane.cols * 100}% + 2px)`, width: `calc(${100 / lane.cols}% - 4px)`, background: colors.bg, borderLeft: `3px solid ${colors.border}` }}
       onClick={() => onEdit(slot)}
       title={`${slot.course_code} — ${slot.program_yr_sec}\n${slot.instructor_name}\n${slot.room_name || 'No room'}\n${slot.start_time?.slice(0,5)}–${slot.end_time?.slice(0,5)}`}
     >
@@ -603,7 +604,7 @@ export default function ScheduleGenerator() {
 
                     {/* Schedule blocks */}
                     {byDay[day].map(slot => (
-                      <ScheduleBlock key={`${slot.id}-${day}`} slot={slot} onEdit={setEditSlot} />
+                      <ScheduleBlock key={`${slot.id}-${day}`} slot={slot} onEdit={setEditSlot} lane={laneLayout(byDay[day]).get(slot)} />
                     ))}
                   </div>
                 ))}
