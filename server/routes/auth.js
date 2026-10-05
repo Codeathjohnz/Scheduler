@@ -5,8 +5,34 @@ import pool from '../config/db.js'
 
 const router = Router()
 
+// "I'm not a robot" check (Google reCAPTCHA v2). Only enforced once
+// RECAPTCHA_SECRET_KEY is set; the site key is handed to the login page so it
+// never has to be baked into the build.
+router.get('/captcha-config', (req, res) => {
+  res.json({ siteKey: process.env.RECAPTCHA_SITE_KEY || null })
+})
+
+async function captchaPasses(token, ip) {
+  if (!process.env.RECAPTCHA_SECRET_KEY) return true
+  if (!token) return false
+  try {
+    const r = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ secret: process.env.RECAPTCHA_SECRET_KEY, response: String(token), remoteip: ip || '' }),
+    })
+    const data = await r.json()
+    return !!data.success
+  } catch {
+    return false
+  }
+}
+
 router.post('/login', async (req, res) => {
-  const { username, password } = req.body
+  const { username, password, captcha } = req.body
+  if (!(await captchaPasses(captcha, req.ip))) {
+    return res.status(400).json({ message: 'Please confirm you are not a robot.' })
+  }
   try {
     const [rows] = await pool.query('SELECT * FROM users WHERE username = ?', [username])
     const user = rows[0]

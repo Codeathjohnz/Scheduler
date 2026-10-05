@@ -16,6 +16,7 @@ api.interceptors.request.use(config => {
 
 export const authAPI = {
   login: (credentials) => api.post('/auth/login', credentials),
+  captchaConfig: () => api.get('/auth/captcha-config'),
 }
 
 export const otpAPI = {

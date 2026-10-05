@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth, ROLES } from '../../context/AuthContext.jsx'
 import { authAPI } from '../../services/api.js'
@@ -32,6 +32,33 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true)
   const [showPw, setShowPw]   = useState(false)
   const [loading, setLoading] = useState(false)
+  // reCAPTCHA ("I'm not a robot"): site key comes from the server at runtime.
+  const [captchaKey, setCaptchaKey] = useState(null)
+  const [captchaToken, setCaptchaToken] = useState('')
+  const captchaRef = useRef(null)
+
+  useEffect(() => {
+    authAPI.captchaConfig().then(r => {
+      if (!r.data.siteKey) return
+      setCaptchaKey(r.data.siteKey)
+      const render = () => {
+        if (captchaRef.current && !captchaRef.current.dataset.rendered) {
+          captchaRef.current.dataset.rendered = '1'
+          window.grecaptcha.render(captchaRef.current, {
+            sitekey: r.data.siteKey,
+            callback: (t) => setCaptchaToken(t),
+            'expired-callback': () => setCaptchaToken(''),
+          })
+        }
+      }
+      if (window.grecaptcha?.render) return render()
+      window.__recaptchaReady = render
+      const script = document.createElement('script')
+      script.src = 'https://www.google.com/recaptcha/api.js?onload=__recaptchaReady&render=explicit'
+      script.async = true
+      document.head.appendChild(script)
+    }).catch(() => {})
+  }, [])
 
   // Google sign-in comes back as /login#google=<payload> (or /login?error=...).
   useEffect(() => {
@@ -58,7 +85,7 @@ export default function LoginPage() {
     e.preventDefault()
     setLoading(true)
     try {
-      const res = await authAPI.login(form)
+      const res = await authAPI.login({ ...form, captcha: captchaToken })
       const { token, user } = res.data
       login({ ...user, token }, remember)
       toast.success(`Welcome, ${user.name}!`)
@@ -180,9 +207,10 @@ export default function LoginPage() {
               </button>
             </div>
 
+            {captchaKey && <div ref={captchaRef} className="flex justify-center" />}
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || (!!captchaKey && !captchaToken)}
               className="w-full bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-bold py-3 rounded-xl transition shadow-md flex items-center justify-center gap-2 text-sm mt-2"
             >
               {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Signing in...</> : <>Sign In <ArrowRight className="w-4 h-4" /></>}
