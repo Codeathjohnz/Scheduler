@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { dayColumnWidth } from '../../utils/timetableLayout.js'
 import { laneLayout } from '../../utils/timetableLayout.js'
 import toast from 'react-hot-toast'
 import api from '../../services/api.js'
@@ -288,6 +289,7 @@ export default function ScheduleGenerator() {
     }
   }
 
+  const colW = dayColumnWidth(byDay, DAYS)
   const publishedCount = schedules.filter(s => s.is_published).length
   // Once a term is published it's final and lives in Transaction History, so
   // the timetable and its tools are hidden here.
@@ -567,9 +569,9 @@ export default function ScheduleGenerator() {
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden print:shadow-none">
           <div className="overflow-x-auto">
-            <div style={{ minWidth: 900 }}>
+            <div style={{ minWidth: 60 + 6 * colW }}>
               {/* Day headers */}
-              <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: '60px repeat(6,1fr)' }}>
+              <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: `60px repeat(6, minmax(${colW}px, 1fr))` }}>
                 <div className="py-2 text-xs text-gray-400 font-semibold text-center border-r border-gray-100"></div>
                 {DAYS.map(d => (
                   <div key={d} className="py-2 text-xs font-bold text-center text-gray-700 border-r border-gray-100 last:border-0">{DAY_SHORT[d]}</div>
@@ -577,7 +579,7 @@ export default function ScheduleGenerator() {
               </div>
 
               {/* Grid body */}
-              <div className="grid" style={{ gridTemplateColumns: '60px repeat(6,1fr)' }}>
+              <div className="grid" style={{ gridTemplateColumns: `60px repeat(6, minmax(${colW}px, 1fr))` }}>
                 {/* Time labels */}
                 <div className="relative" style={{ height: GRID_HEIGHT }}>
                   {HOUR_LABELS.map(h => (
