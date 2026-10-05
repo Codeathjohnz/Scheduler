@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import { schedulingAPI } from '../../services/api.js'
 import toast from 'react-hot-toast'
-import { Loader2, CalendarX2, Clock, DoorOpen, LayoutGrid, List } from 'lucide-react'
+import { Loader2, CalendarX2, Clock, DoorOpen, LayoutGrid, List, Building2, Users } from 'lucide-react'
+import ScheduleGroups from '../../components/common/ScheduleGroups.jsx'
 import RoomTypeBadge, { roomTypeShort, roomMismatch } from '../../components/common/RoomTypeBadge.jsx'
 
 const DAYS      = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
@@ -105,6 +106,14 @@ export default function ChairScheduleView() {
             className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold transition ${viewMode==='list'?'bg-green-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
             <List className="w-3.5 h-3.5"/> List
           </button>
+          <button onClick={() => setViewMode('building')}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold transition ${viewMode==='building'?'bg-green-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
+            <Building2 className="w-3.5 h-3.5"/> By building
+          </button>
+          <button onClick={() => setViewMode('instructor')}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold transition ${viewMode==='instructor'?'bg-green-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
+            <Users className="w-3.5 h-3.5"/> By instructor
+          </button>
         </div>
       </div>
 
@@ -120,6 +129,8 @@ export default function ChairScheduleView() {
             The Admin hasn't published the schedule for <strong>{semLabel} {year}</strong> yet.
           </p>
         </div>
+      ) : (viewMode === 'building' || viewMode === 'instructor') ? (
+        <ScheduleGroups rows={schedules} mode={viewMode} />
       ) : viewMode === 'grid' ? (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
