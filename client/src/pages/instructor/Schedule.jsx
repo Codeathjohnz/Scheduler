@@ -70,7 +70,6 @@ export default function InstructorSchedule() {
   }, [year, semester])
 
   // Group by day for timetable
-  const colW = dayColumnWidth(byDay, DAYS)
   const byDay = {}
   DAYS.forEach(d => { byDay[d] = [] })
   for (const slot of schedules) {
@@ -79,6 +78,7 @@ export default function InstructorSchedule() {
       if (byDay[d]) byDay[d].push(slot)
     }
   }
+  const colW = dayColumnWidth(byDay, DAYS)
 
   // Unique subjects for summary
   const subjects = [...new Map(schedules.map(s => [s.faculty_entry_id, s])).values()]

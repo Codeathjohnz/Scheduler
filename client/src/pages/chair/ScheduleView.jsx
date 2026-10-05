@@ -66,7 +66,6 @@ export default function ChairScheduleView() {
       .finally(() => setLoading(false))
   }, [year, semester])
 
-  const colW = dayColumnWidth(byDay, DAYS)
   const byDay = {}
   DAYS.forEach(d => { byDay[d] = [] })
   for (const slot of schedules) {
@@ -74,6 +73,7 @@ export default function ChairScheduleView() {
       if (byDay[d]) byDay[d].push(slot)
     }
   }
+  const colW = dayColumnWidth(byDay, DAYS)
 
   const instructors = [...new Map(schedules.filter(s => s.instructor_name).map(s => [s.instructor_id, s.instructor_name])).entries()]
   const semLabel = semester === 1 ? '1st Semester' : semester === 2 ? '2nd Semester' : 'Summer'
