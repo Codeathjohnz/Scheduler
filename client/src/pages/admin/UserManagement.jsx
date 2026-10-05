@@ -156,6 +156,7 @@ export default function UserManagement() {
   const [search, setSearch]       = useState('')
   const [filterRole, setFilterRole] = useState('all')
   const [filterDept, setFilterDept] = useState('all')
+  const [filterProgram, setFilterProgram] = useState('all')
   const [showModal, setShowModal] = useState(false)
   const [editUser, setEditUser]   = useState(null)   // null = create mode
   const [form, setForm]           = useState(EMPTY_FORM)
@@ -270,14 +271,29 @@ export default function UserManagement() {
   // One button per department, so e.g. CCIS shows only CCIS users.
   const departments = [...new Set(users.map(u => (u.department || '').trim()).filter(Boolean))].sort()
 
+  // A student's program comes from their section (BSIT 1A -> BSIT); everyone
+  // else's from their Teaches-for / Chair-of tags.
+  const programsOf = (u) => {
+    if (u.role === 'student') {
+      const m = /^([A-Za-z]+)/.exec(String(u.section || '').trim())
+      return m ? [m[1].toUpperCase()] : []
+    }
+    return splitPrograms(u.programs).map(p => p.toUpperCase())
+  }
+  const filterProgramOptions = [...new Set(
+    users.filter(u => filterDept === 'all' || (u.department || '').trim() === filterDept)
+      .flatMap(programsOf)
+  )].sort()
+
   const filtered = users.filter(u => {
     const matchDept   = filterDept === 'all' || (u.department || '').trim() === filterDept
+    const matchProgram = filterProgram === 'all' || programsOf(u).includes(filterProgram)
     const matchRole   = filterRole === 'all' || u.role === filterRole
     const matchSearch = search === '' ||
       u.name.toLowerCase().includes(search.toLowerCase()) ||
       u.username.toLowerCase().includes(search.toLowerCase()) ||
       (u.department || '').toLowerCase().includes(search.toLowerCase())
-    return matchDept && matchRole && matchSearch
+    return matchDept && matchProgram && matchRole && matchSearch
   })
 
   const needsSection = form.role === 'student'
@@ -316,7 +332,7 @@ export default function UserManagement() {
           {['all', ...departments].map(d => {
             const on = filterDept === d
             return (
-              <button key={d} onClick={() => setFilterDept(d)}
+              <button key={d} onClick={() => { setFilterDept(d); setFilterProgram('all') }}
                 className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${on ? 'bg-green-700 border-green-700 text-white' : 'bg-white border-gray-300 text-gray-600 hover:border-green-500'}`}>
                 {d === 'all' ? 'All departments' : d}
               </button>
@@ -341,6 +357,13 @@ export default function UserManagement() {
           <option value="all">All Roles</option>
           {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
+        {filterProgramOptions.length > 0 && (
+          <select value={filterProgram} onChange={e => setFilterProgram(e.target.value)}
+            className="border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-green-500 transition bg-white">
+            <option value="all">All programs</option>
+            {filterProgramOptions.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        )}
       </div>
 
       {/* Users table */}

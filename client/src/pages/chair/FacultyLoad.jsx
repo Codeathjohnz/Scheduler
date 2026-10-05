@@ -1004,7 +1004,9 @@ export default function FacultyLoad() {
   // a form default. Falls back to the chair's own account tag only when the
   // file names no program at all.
   const chairProgram = String(user?.programs || '').split(',')[0].trim()
-  const applyParsedSubjects = (filename, subjects, detected) => {
+  const applyParsedSubjects = (filename, parsed, detected) => {
+    // NSTP isn't part of this system, so it never reaches the preview.
+    const subjects = parsed.filter(s => !/^NSTP/i.test(String(s.course_code || '').trim()))
     if (!subjects.length) { toast.error('No subjects found.'); return }
     const groups = groupSubjects(subjects)
     const exp = {}; groups.forEach(g => { exp[`${g.year_level}-${g.semester}`] = true })
