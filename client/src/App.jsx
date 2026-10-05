@@ -54,6 +54,7 @@ import InstructorConfirmLoad from './pages/instructor/ConfirmLoad.jsx'
 import InstructorMyLoad from './pages/instructor/MyLoad.jsx'
 import TeachingRequests from './pages/shared/TeachingRequests.jsx'
 import NotificationsPage from './pages/shared/NotificationsPage.jsx'
+import ScheduleHistory from './pages/admin/ScheduleHistory.jsx'
 import InstructorSpecialty from './pages/instructor/MySpecialty.jsx'
 import InstructorAccessibility from './pages/instructor/AccessibilityRequest.jsx'
 import InstructorLoadRequest from './pages/instructor/LoadRequest.jsx'
@@ -157,6 +158,7 @@ export default function App() {
             <Route path="accessibility" element={<AdminAccessibility />} />
             <Route path="realtime-rooms" element={<AdminRealTimeRooms />} />
             <Route path="schedule-generator" element={<AdminScheduleGenerator />} />
+            <Route path="schedule-history" element={<ScheduleHistory />} />
           </Route>
 
           {/* Instructor */}

@@ -161,6 +161,7 @@ export const schedulingAPI = {
   publish:  (data)      => api.post('/scheduling/publish', data),
   clear:    (year, sem) => api.delete(`/scheduling/clear?year=${year}&semester=${sem}`),
   getRooms: ()          => api.get('/scheduling/rooms'),
+  history:  ()          => api.get('/scheduling/history'),
 }
 
 export const prospectusAPI = {

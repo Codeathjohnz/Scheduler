@@ -288,6 +288,9 @@ export default function ScheduleGenerator() {
   }
 
   const publishedCount = schedules.filter(s => s.is_published).length
+  // Once a term is published it's final and lives in Transaction History, so
+  // the timetable and its tools are hidden here.
+  const isPublished = publishedCount > 0
 
   return (
     <div>
@@ -339,7 +342,7 @@ export default function ScheduleGenerator() {
               ? <><Loader2 className="w-4 h-4 animate-spin"/>Generating...</>
               : <><Cpu className="w-4 h-4"/>Generate Schedule</>}
           </button>
-          {schedules.length > 0 && <>
+          {schedules.length > 0 && !isPublished && <>
             <button onClick={handlePublish}
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-xl transition text-sm">
               <Globe className="w-4 h-4"/> Publish
@@ -357,7 +360,7 @@ export default function ScheduleGenerator() {
       </div>
 
       {/* Status chips */}
-      {schedules.length > 0 && (
+      {schedules.length > 0 && !isPublished && (
         <div className="flex flex-wrap gap-3 mb-4">
           <span className="flex items-center gap-1.5 text-xs bg-green-100 text-green-800 font-semibold px-3 py-1.5 rounded-full">
             <CheckCircle2 className="w-3.5 h-3.5"/> {schedules.length} sessions scheduled
@@ -423,7 +426,7 @@ export default function ScheduleGenerator() {
       )}
 
       {/* Department statistics */}
-      {schedules.length > 0 && deptStats.length > 0 && (
+      {schedules.length > 0 && !isPublished && deptStats.length > 0 && (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-4">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-gray-800 text-sm">Room Usage by Department</h3>
@@ -469,7 +472,7 @@ export default function ScheduleGenerator() {
       )}
 
       {/* Filter bar */}
-      {schedules.length > 0 && (
+      {schedules.length > 0 && !isPublished && (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-4">
           <div className="flex flex-wrap gap-x-6 gap-y-3">
             {/* All */}
@@ -544,12 +547,21 @@ export default function ScheduleGenerator() {
         <div className="flex items-center justify-center py-24 text-gray-400">
           <Loader2 className="w-6 h-6 animate-spin mr-2"/> Loading...
         </div>
-      ) : schedules.length === 0 ? (
+      ) : schedules.length === 0 || isPublished ? (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center py-24 text-gray-400">
           <Cpu className="w-14 h-14 mb-4 opacity-20"/>
-          <p className="font-semibold text-gray-500 text-base">No schedule generated yet.</p>
-          <p className="text-sm mt-1">Click <strong className="text-green-700">Generate Schedule</strong> to run the AI scheduling engine.</p>
-          <p className="text-xs mt-2 text-amber-600">Requires rooms in Manage Rooms and faculty load entries from the Program Chair.</p>
+          {isPublished ? (
+            <>
+              <p className="font-semibold text-gray-500 text-base">This term has been published.</p>
+              <p className="text-sm mt-1">Its schedule is final and recorded in <strong className="text-green-700">Transaction History</strong>.</p>
+            </>
+          ) : (
+            <>
+              <p className="font-semibold text-gray-500 text-base">No schedule generated yet.</p>
+              <p className="text-sm mt-1">Click <strong className="text-green-700">Generate Schedule</strong> to run the AI scheduling engine.</p>
+              <p className="text-xs mt-2 text-amber-600">Requires rooms in Manage Rooms and faculty load entries from the Program Chair.</p>
+            </>
+          )}
         </div>
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden print:shadow-none">
@@ -610,7 +622,7 @@ export default function ScheduleGenerator() {
       )}
 
       {/* Legend */}
-      {schedules.length > 0 && (
+      {schedules.length > 0 && !isPublished && (
         <div className="flex flex-wrap gap-4 mt-4 text-xs text-gray-500">
           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded border-l-2 bg-green-100 border-green-500"/>&nbsp;Lecture</span>
           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded border-l-2 bg-blue-100 border-blue-500"/>&nbsp;Lab</span>

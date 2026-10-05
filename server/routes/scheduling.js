@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import pool from '../config/db.js'
+import { notify, adminIds } from '../utils/notify.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { generateSchedule, generateScheduleGA, generateScheduleORTools, detectConflicts, minToTime, timeToMin } from '../utils/scheduler.js'
 
@@ -43,6 +44,28 @@ router.get('/', authenticate, async (req, res) => {
 router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
   const { year = '2026-2027', semester = 1, clear_existing = true, engine = 'greedy' } = req.body
   try {
+    // A published term is final: it's recorded in Transaction History, and
+    // generating again would replace it.
+    const [[done]] = await pool.query(
+      'SELECT COUNT(*) AS n FROM generated_schedules WHERE academic_year = ? AND semester = ? AND is_published = 1',
+      [year, semester]
+    )
+    if (done.n > 0) {
+      return res.status(400).json({ message: "This term is already published and recorded in Transaction History, so it can't be generated again." })
+    }
+    // The 2nd semester (and any later one) runs only after the one before it
+    // has been published. Each semester is scheduled against its own rooms
+    // and times, so the earlier term's bookings don't block it.
+    if (Number(semester) > 1) {
+      const [[prev]] = await pool.query(
+        'SELECT COUNT(*) AS n FROM generated_schedules WHERE academic_year = ? AND semester = ? AND is_published = 1',
+        [year, Number(semester) - 1]
+      )
+      if (!prev.n) {
+        const names = ['', '1st', '2nd', 'Summer']
+        return res.status(400).json({ message: `Publish the ${names[Number(semester) - 1]} Semester schedule first. The ${names[Number(semester)]} Semester is generated after it.` })
+      }
+    }
     // Only schedule entries from validated submissions
     const [validatedSubs] = await pool.query(
       `SELECT id, chair_id FROM submissions
@@ -233,12 +256,60 @@ router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
 // ── POST /api/scheduling/publish ──────────────────────────────────────────────
 router.post('/publish', authenticate, authorize('admin'), async (req, res) => {
   const { year, semester } = req.body
+  const conn = await pool.getConnection()
   try {
-    await pool.query(
+    await conn.beginTransaction()
+    // What is about to be published, per department — recorded as history.
+    const [byDept] = await conn.query(`
+      SELECT COALESCE(chair.department, '—') AS dept,
+             COUNT(DISTINCT gs.faculty_entry_id) AS subjects,
+             COUNT(*) AS sessions
+      FROM generated_schedules gs
+      JOIN faculty_load_entries fle ON fle.id = gs.faculty_entry_id
+      LEFT JOIN users chair ON chair.id = fle.chair_id
+      WHERE gs.academic_year = ? AND gs.semester = ? AND gs.is_published = 0
+      GROUP BY dept
+      ORDER BY dept`, [year, semester])
+    if (!byDept.length) {
+      await conn.rollback()
+      return res.status(400).json({ message: 'There is no unpublished schedule for this term.' })
+    }
+    await conn.query(
       'UPDATE generated_schedules SET is_published=1 WHERE academic_year=? AND semester=?',
       [year, semester]
     )
-    res.json({ message: 'Schedule published. Instructors and students can now view it.' })
+    for (const d of byDept) {
+      await conn.query(
+        'INSERT INTO schedule_history (academic_year, semester, department, subjects, sessions, published_by) VALUES (?, ?, ?, ?, ?, ?)',
+        [year, semester, d.dept, d.subjects, d.sessions, req.user.id]
+      )
+    }
+    await conn.commit()
+    const depts = byDept.map(d => d.dept).join(', ')
+    await notify(await adminIds(), {
+      type: 'schedule_published', link: '/admin/schedule-history',
+      title: `${year} ${semester === 1 ? '1st' : semester === 2 ? '2nd' : semester} Semester schedule published`,
+      body: `Departments finished: ${depts}. See Transaction History.`,
+    })
+    res.json({ message: 'Schedule published. Instructors and students can now view it.', departments: byDept.map(d => d.dept) })
+  } catch (err) {
+    await conn.rollback()
+    res.status(500).json({ message: err.message })
+  } finally {
+    conn.release()
+  }
+})
+
+// GET /api/scheduling/history — registrar's record of what was published, and when
+router.get('/history', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT h.*, u.name AS published_by_name
+      FROM schedule_history h
+      LEFT JOIN users u ON u.id = h.published_by
+      ORDER BY h.published_at DESC, h.id DESC
+      LIMIT 500`)
+    res.json(rows)
   } catch (err) { res.status(500).json({ message: err.message }) }
 })
 
