@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import ProgramPicker from '../../components/common/ProgramPicker.jsx'
+import StudentImportModal from '../../components/admin/StudentImportModal.jsx'
 import { usersAPI, prospectusAPI } from '../../services/api.js'
 import toast from 'react-hot-toast'
 import {
   Plus, Pencil, Trash2, X, Eye, EyeOff,
   Users, ShieldCheck, GraduationCap, BookOpen, UserCircle, Loader2, Search,
-  Mail, Building2, Star, IdCard, Award, BadgeCheck, Bookmark
+  Mail, Building2, Star, IdCard, Award, BadgeCheck, Bookmark, Upload
 } from 'lucide-react'
 
 const ROLES = [
@@ -156,6 +157,7 @@ export default function UserManagement() {
   const [search, setSearch]       = useState('')
   const [filterRole, setFilterRole] = useState('all')
   const [filterDept, setFilterDept] = useState('all')
+  const [showImport, setShowImport] = useState(false)
   const [filterProgram, setFilterProgram] = useState('all')
   const [showModal, setShowModal] = useState(false)
   const [editUser, setEditUser]   = useState(null)   // null = create mode
@@ -304,10 +306,16 @@ export default function UserManagement() {
         title="User Management"
         subtitle="Create and manage system users across all roles."
         action={
-          <button onClick={openCreate}
-            className="flex items-center gap-2 bg-green-700 hover:bg-green-800 text-white font-semibold px-4 py-2.5 rounded-xl transition shadow text-sm">
-            <Plus className="w-4 h-4" /> Add User
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowImport(true)}
+              className="flex items-center gap-2 bg-white hover:bg-green-50 border-2 border-green-700 text-green-800 font-semibold px-4 py-2.5 rounded-xl transition text-sm">
+              <Upload className="w-4 h-4" /> Import students
+            </button>
+            <button onClick={openCreate}
+              className="flex items-center gap-2 bg-green-700 hover:bg-green-800 text-white font-semibold px-4 py-2.5 rounded-xl transition shadow text-sm">
+              <Plus className="w-4 h-4" /> Add User
+            </button>
+          </div>
         }
       />
 
@@ -325,6 +333,8 @@ export default function UserManagement() {
           )
         })}
       </div>
+
+      {showImport && <StudentImportModal onClose={() => setShowImport(false)} onImported={fetchUsers} />}
 
       {/* Department filter */}
       {departments.length > 0 && (

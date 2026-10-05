@@ -28,6 +28,7 @@ export const otpAPI = {
 export const usersAPI = {
   getAll:  ()           => api.get('/users'),
   getOne:  (id)         => api.get(`/users/${id}`),
+  importStudents: (students) => api.post('/users/import-students', { students }),
   getProgramOptions: (department) => api.get(`/users/program-options?department=${encodeURIComponent(department || '')}`),
   setMyPrograms:     (programs)   => api.put('/users/me/programs', { programs }),
   setMyCrossDept:    (open)       => api.put('/users/me/cross-dept', { open }),
