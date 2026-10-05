@@ -192,6 +192,10 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
   try {
     const [[existing]] = await pool.query('SELECT id FROM users WHERE username = ?', [username])
     if (existing) return res.status(409).json({ message: 'Username already exists.' })
+    if (mail.email) {
+      const [[sameMail]] = await pool.query('SELECT id, username FROM users WHERE email = ? LIMIT 1', [mail.email])
+      if (sameMail) return res.status(409).json({ message: `${mail.email} already belongs to another account (${sameMail.username}). Each person needs their own email.` })
+    }
 
     const hash = await bcrypt.hash(password, 10)
     const [result] = await pool.query(
@@ -215,6 +219,10 @@ router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
   try {
     const [[user]] = await pool.query('SELECT id FROM users WHERE id = ?', [req.params.id])
     if (!user) return res.status(404).json({ message: 'User not found.' })
+    if (mail.email) {
+      const [[sameMail]] = await pool.query('SELECT id, username FROM users WHERE email = ? AND id <> ? LIMIT 1', [mail.email, req.params.id])
+      if (sameMail) return res.status(409).json({ message: `${mail.email} already belongs to another account (${sameMail.username}). Each person needs their own email.` })
+    }
 
     if (password) {
       const hash = await bcrypt.hash(password, 10)

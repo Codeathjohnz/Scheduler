@@ -345,6 +345,26 @@ const steps = [
       return r.affectedRows > 0
     },
   },
+  // One email, one account. Google sign-in finds the account by email, so two
+  // accounts sharing an address would be ambiguous. The rule can only be added
+  // once no duplicates exist; if some do, this says which, and waits.
+  {
+    name: 'users.email unique (one account per institutional email)',
+    async run(pool) {
+      const [[idx]] = await pool.query(
+        "SELECT COUNT(*) AS n FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND INDEX_NAME = 'uq_users_email'"
+      )
+      if (idx.n) return false
+      const [dupes] = await pool.query(
+        'SELECT email, COUNT(*) AS n FROM users WHERE email IS NOT NULL GROUP BY email HAVING COUNT(*) > 1'
+      )
+      if (dupes.length) {
+        throw new Error(`${dupes.length} email(s) are on more than one account (${dupes.slice(0, 5).map(d => d.email).join(', ')}). Keep one account per email, then restart.`)
+      }
+      await pool.query('ALTER TABLE users ADD UNIQUE KEY uq_users_email (email)')
+      return true
+    },
+  },
 ]
 
 export async function runMigrations(pool) {
