@@ -1,11 +1,12 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from '../components/common/Sidebar.jsx'
-import { LayoutDashboard, ClipboardCheck, PenTool } from 'lucide-react'
+import { LayoutDashboard, ClipboardCheck, PenTool , Bell} from 'lucide-react'
 
 const nav = [
   { to: '/chief-cpd', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/chief-cpd/review', icon: ClipboardCheck, label: 'Review Submissions' },
   { to: '/chief-cpd/signature', icon: PenTool, label: 'My E-Signature' },
+  { to: '/chief-cpd/notifications', icon: Bell, label: 'Notifications' },
 ]
 
 export default function ChiefCPDLayout() {

@@ -341,6 +341,9 @@ export default function MySpecialty() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-mono font-bold text-sm text-green-800">{s.course_code}</span>
+                            {s.program && (
+                              <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800" title="The program this copy of the subject belongs to">{s.program}</span>
+                            )}
                             {s.lab_hours > 0 && (
                               <span className="flex items-center gap-1 text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">
                                 <FlaskConical className="w-3 h-3" /> Lab

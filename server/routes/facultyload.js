@@ -843,4 +843,40 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
   }
 })
 
+// GET /api/faculty-load/confirmations?year=&semester=  — the chair's view of
+// who has confirmed their load for the term, who is still waiting, and who
+// hasn't been asked yet (not on a submission). Placeholders aren't people,
+// so they're left out.
+router.get('/confirmations', authenticate, authorize('chair'), async (req, res) => {
+  const { year = '2026-2027', semester = 1 } = req.query
+  try {
+    const [[sub]] = await pool.query(
+      'SELECT id FROM submissions WHERE chair_id = ? AND academic_year = ? AND semester = ? ORDER BY id DESC LIMIT 1',
+      [req.user.id, year, semester]
+    )
+    const [instructors] = await pool.query(`
+      SELECT DISTINCT u.id, u.name, u.department
+      FROM faculty_load_entries fle
+      JOIN users u ON u.id = fle.assigned_instructor_id
+      WHERE fle.chair_id = ? AND fle.academic_year = ? AND fle.semester = ? AND u.is_placeholder = 0
+      ORDER BY u.name`, [req.user.id, year, semester])
+    const confirmations = new Map()
+    if (sub) {
+      const [rows] = await pool.query(
+        'SELECT instructor_id, confirmed_at FROM submission_confirmations WHERE submission_id = ?', [sub.id])
+      for (const r of rows) confirmations.set(r.instructor_id, r)
+    }
+    const out = { confirmed: [], pending: [], not_asked: [] }
+    for (const i of instructors) {
+      const c = confirmations.get(i.id)
+      if (c && c.confirmed_at) out.confirmed.push({ ...i, confirmed_at: c.confirmed_at })
+      else if (c) out.pending.push(i)
+      else out.not_asked.push(i)
+    }
+    res.json(out)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
 export default router

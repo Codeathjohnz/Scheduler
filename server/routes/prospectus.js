@@ -243,7 +243,7 @@ async function departmentSubjects(department, semester, programs = []) {
   const scoped = programs.length
     ? major.filter(s => !s.prospectus_program || programs.includes(programKey(s.prospectus_program)))
     : major
-  return scoped.map(({ prospectus_program, ...rest }) => rest)
+  return scoped.map(({ prospectus_program, ...rest }) => ({ ...rest, program: prospectus_program || null }))
 }
 
 // GET /api/prospectus/latest/subjects?semester=1  — subjects from the most
@@ -318,8 +318,11 @@ router.get('/:id/subjects', authenticate, async (req, res) => {
 
 // POST /api/prospectus  — chair imports a prospectus (subjects parsed on client)
 router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => {
-  const { program, academic_year, filename, subjects, detected_program } = req.body
+  const { program, academic_year, filename, detected_program } = req.body
 
+  // NSTP is not part of this system or its schedule, so it's dropped here
+  // no matter what the file contained.
+  const subjects = Array.isArray(req.body.subjects) ? req.body.subjects.filter(s => !isNstp(s?.course_code)) : []
   if (!subjects || !Array.isArray(subjects) || subjects.length === 0) {
     return res.status(400).json({ message: 'No subjects provided.' })
   }

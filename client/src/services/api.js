@@ -134,6 +134,7 @@ export const loadRequestAPI = {
 
 export const facultyLoadAPI = {
   getAll:           (year, sem)             => api.get(`/faculty-load?year=${year}&semester=${sem}`),
+  confirmations:    (year, sem)             => api.get(`/faculty-load/confirmations?year=${year}&semester=${sem}`),
   create:           (data)                  => api.post('/faculty-load', data),
   update:           (id, data)              => api.put(`/faculty-load/${id}`, data),
   remove:           (id)                    => api.delete(`/faculty-load/${id}`),
@@ -161,6 +162,7 @@ export const schedulingAPI = {
   publish:  (data)      => api.post('/scheduling/publish', data),
   clear:    (year, sem) => api.delete(`/scheduling/clear?year=${year}&semester=${sem}`),
   getRooms: ()          => api.get('/scheduling/rooms'),
+  history:  ()          => api.get('/scheduling/history'),
 }
 
 export const prospectusAPI = {

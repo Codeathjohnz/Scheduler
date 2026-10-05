@@ -1,10 +1,11 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from '../components/common/Sidebar.jsx'
-import { LayoutDashboard, CalendarDays } from 'lucide-react'
+import { LayoutDashboard, CalendarDays , Bell} from 'lucide-react'
 
 const nav = [
   { to: '/student', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/student/schedule', icon: CalendarDays, label: 'My Class Schedule' },
+  { to: '/student/notifications', icon: Bell, label: 'Notifications' },
 ]
 
 export default function StudentLayout() {

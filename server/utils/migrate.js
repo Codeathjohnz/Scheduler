@@ -308,6 +308,31 @@ const steps = [
       return changed > 0
     },
   },
+  // Transaction history: one row per department each time a term's schedule
+  // is published, so the registrar can see which departments are finished.
+  {
+    name: 'schedule_history table (published schedules, per department)',
+    async run(pool) {
+      const [[t]] = await pool.query(
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schedule_history'"
+      )
+      if (t) return false
+      await pool.query(`
+        CREATE TABLE schedule_history (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          academic_year VARCHAR(20) NOT NULL,
+          semester TINYINT NOT NULL,
+          department VARCHAR(100) NOT NULL,
+          subjects INT NOT NULL DEFAULT 0,
+          sessions INT NOT NULL DEFAULT 0,
+          published_by INT NULL,
+          published_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          KEY idx_term (academic_year, semester)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+      return true
+    },
+  },
 ]
 
 export async function runMigrations(pool) {
