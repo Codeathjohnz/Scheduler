@@ -333,6 +333,18 @@ const steps = [
       return true
     },
   },
+  // Students were sometimes saved with their section (e.g. "BSIT 1A") in the
+  // department field, so they didn't belong to any college in the filters.
+  // BSIT and BSIS students belong to CCIS; the section stays as it was.
+  {
+    name: 'students: section stored as department -> CCIS (BSIT/BSIS)',
+    async run(pool) {
+      const [r] = await pool.query(
+        "UPDATE users SET department = 'CCIS' WHERE role = 'student' AND (department REGEXP '^BS(IT|IS) ' OR department REGEXP '^BS(IT|IS)-')"
+      )
+      return r.affectedRows > 0
+    },
+  },
 ]
 
 export async function runMigrations(pool) {
