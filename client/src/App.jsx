@@ -54,6 +54,7 @@ import InstructorConfirmLoad from './pages/instructor/ConfirmLoad.jsx'
 import InstructorMyLoad from './pages/instructor/MyLoad.jsx'
 import TeachingRequests from './pages/shared/TeachingRequests.jsx'
 import NotificationsPage from './pages/shared/NotificationsPage.jsx'
+import ChairConfirmations from './pages/chair/ChairConfirmations.jsx'
 import ScheduleHistory from './pages/admin/ScheduleHistory.jsx'
 import InstructorSpecialty from './pages/instructor/MySpecialty.jsx'
 import InstructorAccessibility from './pages/instructor/AccessibilityRequest.jsx'
@@ -102,6 +103,7 @@ export default function App() {
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="submission" element={<ChairSubmission />} />
             <Route path="schedule" element={<ChairScheduleView />} />
+            <Route path="confirmations" element={<ChairConfirmations />} />
             <Route path="faculty-load" element={<ChairFacultyLoad />} />
             <Route path="load-requests" element={<ChairLoadRequests />} />
             <Route path="my-load" element={<InstructorMyLoad />} />

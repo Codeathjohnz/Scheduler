@@ -134,6 +134,7 @@ export const loadRequestAPI = {
 
 export const facultyLoadAPI = {
   getAll:           (year, sem)             => api.get(`/faculty-load?year=${year}&semester=${sem}`),
+  confirmations:    (year, sem)             => api.get(`/faculty-load/confirmations?year=${year}&semester=${sem}`),
   create:           (data)                  => api.post('/faculty-load', data),
   update:           (id, data)              => api.put(`/faculty-load/${id}`, data),
   remove:           (id)                    => api.delete(`/faculty-load/${id}`),

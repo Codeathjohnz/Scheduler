@@ -14,6 +14,7 @@ const nav = [
   { to: '/chair/specialty', icon: GraduationCap, label: 'My Specialty' },
   { to: '/chair/accessibility', icon: Accessibility, label: 'Accessibility Request' },
   { to: '/chair/notifications', icon: Bell, label: 'Notifications' },
+  { to: '/chair/confirmations', icon: CheckSquare, label: 'Load Confirmations' },
 ]
 
 export default function ChairLayout() {
