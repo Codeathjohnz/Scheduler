@@ -147,6 +147,7 @@ export const facultyLoadAPI = {
   getSectionCounts: (year, sem)             => api.get(`/faculty-load/section-counts?year=${year}&semester=${sem}`),
   setSectionCounts: (academic_year, semester, counts) => api.put('/faculty-load/section-counts', { academic_year, semester, counts }),
   getMyLoad:        (year, sem)             => api.get(`/faculty-load/my-load?year=${year}&semester=${sem}`),
+  myLoadExcel:      (year, sem)             => api.get(`/faculty-load/my-load.xlsx?year=${year}&semester=${sem}`, { responseType: 'blob' }),
   exportDocx:       (year, sem, collegeName, programName) => api.get(
     `/faculty-load/export-docx?year=${year}&semester=${sem}&collegeName=${encodeURIComponent(collegeName)}&programName=${encodeURIComponent(programName)}`,
     { responseType: 'blob' }
