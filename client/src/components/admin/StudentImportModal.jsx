@@ -2,7 +2,7 @@ import { useState } from 'react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 import { usersAPI } from '../../services/api.js'
-import { readClassListFile, combineClassLists, isInstitutionalEmail } from '../../utils/classList.js'
+import { readClassListFile, combineClassLists, isInstitutionalEmail, readAccountRecord, buildRecordStudents } from '../../utils/classList.js'
 import { X, Upload, Loader2, Download, CheckCircle2, AlertTriangle } from 'lucide-react'
 
 /**
@@ -24,13 +24,25 @@ export default function StudentImportModal({ onClose, onImported }) {
     setReading(true)
     try {
       const parsed = []
+      const records = []
       for (const f of picked) {
-        const r = readClassListFile(await f.arrayBuffer())
+        const buf = await f.arrayBuffer()
+        const rec = readAccountRecord(buf)
+        if (rec) { records.push(...rec); parsed.push({ name: f.name, section: 'account record', students: [] }); continue }
+        const r = readClassListFile(buf)
         if (r.error) { toast.error(`${f.name}: ${r.error}`); continue }
         parsed.push({ name: f.name, ...r })
       }
+      const combined = combineClassLists(parsed)
+      if (records.length) {
+        // Programs are matched to a Program Chair's tag to find the department.
+        const users = (await usersAPI.getAll()).data
+        const recStudents = buildRecordStudents(records, users)
+        combined.students = [...combined.students, ...recStudents]
+        combined.unresolvedPrograms = [...new Set(recStudents.filter(s => s.unresolved).map(s => s.program))]
+      }
       setFiles(parsed)
-      setSummary(combineClassLists(parsed))
+      setSummary(combined)
       setResult(null)
     } catch (err) {
       toast.error('Could not read those files. Use the class-list spreadsheets.')
@@ -39,16 +51,17 @@ export default function StudentImportModal({ onClose, onImported }) {
     }
   }
 
-  const toCreate  = summary ? summary.students.filter(s => isInstitutionalEmail(s.email)) : []
+  const toCreate  = summary ? summary.students.filter(s => isInstitutionalEmail(s.email) && !s.unresolved) : []
   const noEmail   = summary ? summary.students.filter(s => !isInstitutionalEmail(s.email)) : []
+  const unresolved = summary ? summary.students.filter(s => s.unresolved) : []
 
   const runImport = async () => {
     if (!toCreate.length) return
     setImporting(true)
     try {
       const payload = toCreate.map(s => ({
-        student_id: s.student_id, last_name: s.last_name, first_name: s.first_name,
-        middle_name: s.middle_name, email: s.email, section: s.section,
+        student_id: s.student_id, name: s.name || '', last_name: s.last_name, first_name: s.first_name,
+        middle_name: s.middle_name, email: s.email, section: s.section, department: s.department || '',
       }))
       const r = await usersAPI.importStudents(payload)
       setResult(r.data)
@@ -104,6 +117,12 @@ export default function StudentImportModal({ onClose, onImported }) {
                 Each student's account goes in their <strong>home section</strong>: the lowest year level they're listed in.
                 The username is the part of their email before the @.
               </p>
+              {summary.unresolvedPrograms?.length > 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                  <p className="font-bold">{unresolved.length} won't be created: no Program Chair is tagged for {summary.unresolvedPrograms.join(', ')}.</p>
+                  <p className="mt-1">Add the program to that chair's Program tag on Manage Users, then import again.</p>
+                </div>
+              )}
               {noEmail.length > 0 && (
                 <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800">
                   <p className="font-bold flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> {noEmail.length} won't be created: not an @adssu.edu.ph address</p>
@@ -121,7 +140,7 @@ export default function StudentImportModal({ onClose, onImported }) {
                     {toCreate.slice(0, 200).map(s => (
                       <tr key={s.student_id}>
                         <td className="px-3 py-1.5 font-mono">{s.student_id}</td>
-                        <td className="px-3 py-1.5">{[s.first_name, s.middle_name, s.last_name].filter(Boolean).join(' ')}</td>
+                        <td className="px-3 py-1.5">{s.name || [s.first_name, s.middle_name, s.last_name].filter(Boolean).join(' ')}</td>
                         <td className="px-3 py-1.5">{s.section.replace('-', ' ')}</td>
                         <td className="px-3 py-1.5 text-gray-500">{s.email}</td>
                       </tr>

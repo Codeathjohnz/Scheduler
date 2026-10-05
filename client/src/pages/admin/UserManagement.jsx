@@ -277,8 +277,8 @@ export default function UserManagement() {
   // else's from their Teaches-for / Chair-of tags.
   const programsOf = (u) => {
     if (u.role === 'student') {
-      const m = /^([A-Za-z]+)/.exec(String(u.section || '').trim())
-      return m ? [m[1].toUpperCase()] : []
+      const first = String(u.section || '').trim().split(' ')[0]
+      return first ? [first.toUpperCase()] : []
     }
     return splitPrograms(u.programs).map(p => p.toUpperCase())
   }
