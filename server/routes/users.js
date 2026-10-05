@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 
@@ -273,6 +274,56 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
     res.json({ message: 'User deleted.' })
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
+  }
+})
+
+// ── Bulk student import (registrar) ─────────────────────────────────────────
+// The registrar uploads class-list spreadsheets; the client reads them and
+// sends one row per student here. Each student gets a student account with a
+// random starting password, returned once so the registrar can hand it out.
+const STUDENT_PASSWORD_CHARS = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'
+function randomPassword(len = 10) {
+  const bytes = crypto.randomBytes(len)
+  let out = ''
+  for (const b of bytes) out += STUDENT_PASSWORD_CHARS[b % STUDENT_PASSWORD_CHARS.length]
+  return out
+}
+const DEPT_BY_PROGRAM = { BSIT: 'CCIS', BSIS: 'CCIS' }
+
+// POST /api/users/import-students — body: { students: [{ student_id, last_name, first_name, middle_name, email, section }] }
+router.post('/import-students', authenticate, authorize('admin'), async (req, res) => {
+  const list = Array.isArray(req.body?.students) ? req.body.students : []
+  if (!list.length) return res.status(400).json({ message: 'No students to import.' })
+  if (list.length > 2000) return res.status(400).json({ message: 'Import at most 2,000 students at a time.' })
+
+  const created = []
+  const skipped = []
+  try {
+    for (const raw of list) {
+      const studentId = String(raw.student_id || '').trim()
+      const email = String(raw.email || '').trim().toLowerCase()
+      const section = String(raw.section || '').trim().replace(/-/g, ' ').replace(/\s+/g, ' ')
+      const label = `${studentId} ${raw.last_name || ''}`.trim()
+      if (!studentId || !raw.last_name || !raw.first_name) { skipped.push({ label, reason: 'Missing name or student ID.' }); continue }
+      if (!/^[a-z0-9._-]+@adssu\.edu\.ph$/.test(email)) { skipped.push({ label, reason: `Not an institutional email (${email || 'none'}).` }); continue }
+      const username = email.slice(0, email.indexOf('@'))
+
+      const [[dupe]] = await pool.query('SELECT id FROM users WHERE username = ? OR LOWER(email) = ? LIMIT 1', [username, email])
+      if (dupe) { skipped.push({ label, reason: 'An account with this email or username already exists.' }); continue }
+
+      const program = (section.split(' ')[0] || '').toUpperCase()
+      const name = [raw.first_name, raw.middle_name, raw.last_name].map(x => String(x || '').trim()).filter(Boolean).join(' ')
+      const password = randomPassword()
+      const hash = await bcrypt.hash(password, 10)
+      await pool.query(
+        'INSERT INTO users (username, password_hash, name, role, department, section, email) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [username, hash, name, 'student', DEPT_BY_PROGRAM[program] || null, section || null, email]
+      )
+      created.push({ student_id: studentId, name, username, email, section, password })
+    }
+    res.json({ created, skipped })
+  } catch (err) {
+    res.status(500).json({ message: err.message, created, skipped })
   }
 })
 
