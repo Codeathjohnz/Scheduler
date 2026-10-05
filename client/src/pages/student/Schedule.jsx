@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { dayColumnWidth } from '../../utils/timetableLayout.js'
 import { laneLayout } from '../../utils/timetableLayout.js'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import { schedulingAPI } from '../../services/api.js'
@@ -71,6 +72,7 @@ export default function StudentSchedule() {
   }, [year, semester])
 
   // Group by day for timetable
+  const colW = dayColumnWidth(byDay, DAYS)
   const byDay = {}
   DAYS.forEach(d => { byDay[d] = [] })
   for (const slot of schedules) {
@@ -139,9 +141,9 @@ export default function StudentSchedule() {
         /* ── Timetable Grid ── */
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
-            <div style={{ minWidth: 700 }}>
+            <div style={{ minWidth: 56 + 6 * colW }}>
               {/* Day headers */}
-              <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: '56px repeat(6,1fr)' }}>
+              <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: `56px repeat(6, minmax(${colW}px, 1fr))` }}>
                 <div className="py-2 border-r border-gray-100" />
                 {DAYS.map(d => (
                   <div key={d} className={`py-2 text-xs font-bold text-center border-r border-gray-100 last:border-0 ${byDay[d].length ? 'text-gray-700' : 'text-gray-300'}`}>
@@ -151,7 +153,7 @@ export default function StudentSchedule() {
               </div>
 
               {/* Body */}
-              <div className="grid" style={{ gridTemplateColumns: '56px repeat(6,1fr)' }}>
+              <div className="grid" style={{ gridTemplateColumns: `56px repeat(6, minmax(${colW}px, 1fr))` }}>
                 {/* Time axis */}
                 <div className="relative border-r border-gray-100" style={{ height: (GRID_END - GRID_START) * PX_PER_MIN }}>
                   {HOUR_LABELS.map(h => (

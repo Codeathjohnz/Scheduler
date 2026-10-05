@@ -44,3 +44,15 @@ export function laneLayout(slots) {
   flush()
   return out
 }
+
+/**
+ * Width in px for one day column: wide enough that every side-by-side block
+ * stays readable, so the busiest day sets the width and the timetable scrolls.
+ */
+export function dayColumnWidth(byDay, days, perBlock = 120, min = 150) {
+  let cols = 1
+  for (const d of days) {
+    for (const v of laneLayout(byDay[d] || []).values()) cols = Math.max(cols, v.cols)
+  }
+  return Math.max(min, cols * perBlock)
+}
