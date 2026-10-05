@@ -85,8 +85,19 @@ export default function StudentImportModal({ onClose, onImported }) {
     XLSX.writeFile(wb, `Student_accounts_${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
+  const busy = reading || importing
+  const busyText = reading
+    ? 'Reading the spreadsheets…'
+    : `Creating accounts for ${toCreate.length} students. This can take a minute; please keep this window open.`
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      {busy && (
+        <div className="fixed inset-0 z-[60] bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center" role="status" aria-live="polite">
+          <Loader2 className="w-10 h-10 animate-spin text-green-700" />
+          <p className="mt-4 font-semibold text-green-900">{busyText}</p>
+        </div>
+      )}
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 bg-green-800 rounded-t-2xl">
           <div>
