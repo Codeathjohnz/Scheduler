@@ -1,3 +1,4 @@
+import { creditOf } from '../../utils/unitCredit.js'
 import { useState, useEffect } from 'react'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import { facultyLoadAPI } from '../../services/api.js'
@@ -48,7 +49,7 @@ export default function InstructorMyLoad() {
   const totalUnits   = loadEntries.reduce((a, e) => a + Number(e.units), 0)
   const totalLec     = loadEntries.reduce((a, e) => a + Number(e.lec_hours), 0)
   const totalLab     = loadEntries.reduce((a, e) => a + Number(e.lab_hours), 0)
-  const totalCredit  = loadEntries.reduce((a, e) => a + unitCredit(e.lec_hours, e.lab_hours), 0)
+  const totalCredit  = loadEntries.reduce((a, e) => a + creditOf(e), 0)
   const totalOther   = adminLoads.reduce((a, l) => a + Number(l.units), 0)
   const grandCredit  = totalCredit + totalOther
 
@@ -141,8 +142,8 @@ export default function InstructorMyLoad() {
                         <td className="px-3 py-2 text-center text-gray-500">{e.lab_hours}</td>
                         <td className="px-3 py-2 text-center text-gray-500">
                           {isNstp(e.course_code)
-                            ? <span title="NSTP does not count toward unit-credit load">{unitCredit(e.lec_hours, e.lab_hours).toFixed(2)} *</span>
-                            : unitCredit(e.lec_hours, e.lab_hours).toFixed(2)}
+                            ? <span title="NSTP does not count toward unit-credit load">{creditOf(e).toFixed(2)} *</span>
+                            : creditOf(e).toFixed(2)}
                         </td>
                       </tr>
                     ))}

@@ -5,6 +5,7 @@
  *
  * One sheet per instructor, so a whole department can be printed from one file.
  */
+import { creditOf } from './unitCredit.js'
 import ExcelJS from 'exceljs'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -131,7 +132,7 @@ export async function buildIflWorkbook({ instructor, semester, year, sessions, e
   line('A. Academic Load', { bold: true })
   let acU = 0, acC = 0, acH = 0
   for (const e of entries) {
-    const u = Number(e.units || 0), cr = credit(e.lec_hours, e.lab_hours), h = Number(e.lec_hours || 0) + Number(e.lab_hours || 0)
+    const u = Number(e.units || 0), cr = creditOf(e), h = Number(e.lec_hours || 0) + Number(e.lab_hours || 0)
     acU += u; acC += cr; acH += h
     line(`${e.course_code} ${e.descriptive_title || ''} ${e.program_yr_sec || ''}`.trim(), { units: u, credit: cr, contact: h, fill: AMBER })
   }

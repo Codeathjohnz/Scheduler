@@ -1,3 +1,4 @@
+import { creditOf } from './unitCredit.js'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -247,7 +248,7 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
       units: e.units,
       lec: e.lec_hours,
       lab: e.lab_hours,
-      unitCredit: round2(unitCredit(e.lec_hours, e.lab_hours)),
+      unitCredit: round2(creditOf(e)),
       contactHours: contactHours(e.lec_hours, e.lab_hours),
       labRoom: e.room || '',
     })
@@ -260,7 +261,7 @@ export async function generateFacultyLoadingDocx({ chairId, academicYear, semest
       units: a.units,
       lec: a.lec_hours || 0,
       lab: a.lab_hours || 0,
-      unitCredit: round2(unitCredit(a.lec_hours, a.lab_hours) || Number(a.units)),
+      unitCredit: round2(creditOf(a) || Number(a.units)),
       contactHours: contactHours(a.lec_hours, a.lab_hours) || Number(a.units),
     }
     if (a.load_type === 'administrative') inst.adminLoads.push(row)

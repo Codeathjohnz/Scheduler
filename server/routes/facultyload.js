@@ -1,3 +1,4 @@
+import { creditOf } from '../utils/unitCredit.js'
 import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
@@ -81,7 +82,7 @@ async function getOtherLoadMap(academic_year, semester) {
 // convention used everywhere else in this file.
 export async function getCombinedLoadMap(academic_year, semester) {
   const [teachRows] = await pool.query(
-    `SELECT assigned_instructor_id AS instructor_id, lec_hours, lab_hours, course_code
+    `SELECT assigned_instructor_id AS instructor_id, lec_hours, lab_hours, course_code, descriptive_title, units
      FROM faculty_load_entries
      WHERE academic_year=? AND semester=? AND assigned_instructor_id IS NOT NULL`,
     [academic_year, semester]
@@ -89,7 +90,7 @@ export async function getCombinedLoadMap(academic_year, semester) {
   const map = {}
   for (const r of teachRows) {
     if (isNstp(r.course_code)) continue
-    map[r.instructor_id] = (map[r.instructor_id] || 0) + unitCredit(r.lec_hours, r.lab_hours)
+    map[r.instructor_id] = (map[r.instructor_id] || 0) + creditOf(r)
   }
   const otherMap = await getOtherLoadMap(academic_year, semester)
   for (const [id, units] of Object.entries(otherMap)) {
@@ -432,7 +433,7 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
     // Another department's instructor → send a request instead of assigning.
     const cross = await crossDeptTarget(req.user.id, req.user.role, assigned_instructor_id)
     if (cross) {
-      const problem = await crossDeptProblem(cross, subject_id, academic_year, semester, unitCredit(subject.lec_hours, subject.lab_hours), req.user.id)
+      const problem = await crossDeptProblem(cross, subject_id, academic_year, semester, creditOf(subject), req.user.id)
       if (problem) return res.status(400).json({ message: problem })
     } else if (assigned_instructor_id) {
       const problem = await programMismatchProblem(assigned_instructor_id, subject_id)
@@ -465,7 +466,7 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
     // Only when the instructor is actually being CHANGED: an inline edit of
     // Section/Room re-sends the current (or still-unassigned) value untouched.
     const [[before]] = await pool.query(
-      'SELECT assigned_instructor_id, subject_id, lec_hours, lab_hours, academic_year, semester FROM faculty_load_entries WHERE id = ?',
+      'SELECT assigned_instructor_id, subject_id, lec_hours, lab_hours, descriptive_title, units, academic_year, semester FROM faculty_load_entries WHERE id = ?',
       [req.params.id]
     )
     if (!before) return res.status(404).json({ message: 'Entry not found.' })
@@ -474,11 +475,11 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
     if (instructorChanged) {
       cross = await crossDeptTarget(req.user.id, req.user.role, assigned_instructor_id)
       if (cross) {
-        let credit = unitCredit(before.lec_hours, before.lab_hours)
+        let credit = creditOf(before)
         let subjId = before.subject_id
         if (subject_id) {
-          const [[sub]] = await pool.query('SELECT lec_hours, lab_hours FROM prospectus_subjects WHERE id = ?', [subject_id])
-          if (sub) { credit = unitCredit(sub.lec_hours, sub.lab_hours); subjId = subject_id }
+          const [[sub]] = await pool.query('SELECT lec_hours, lab_hours, descriptive_title, units FROM prospectus_subjects WHERE id = ?', [subject_id])
+          if (sub) { credit = creditOf(sub); subjId = subject_id }
         }
         const problem = await crossDeptProblem(cross, subjId, before.academic_year, before.semester, credit, req.user.id)
         if (problem) return res.status(400).json({ message: problem })
@@ -757,7 +758,7 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
       const tiers = specialtyMap[sub.id] || { 1: [], 2: [] }
       pending.push({
         idx, sub,
-        credit: isNstp(sub.course_code) ? 0 : unitCredit(sub.lec_hours, sub.lab_hours),
+        credit: isNstp(sub.course_code) ? 0 : creditOf(sub),
         first:  tiers[1].filter(id => eligiblePool.includes(id)),
         second: tiers[2].filter(id => eligiblePool.includes(id)),
       })

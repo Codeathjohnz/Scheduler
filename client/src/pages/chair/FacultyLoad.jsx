@@ -1,3 +1,4 @@
+import { creditOf } from '../../utils/unitCredit.js'
 import { useState, useEffect, useRef, Fragment } from 'react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
@@ -161,7 +162,7 @@ function PrintView({ entries, adminLoads, year, semester, onClose }) {
           const totalUnits   = loadSubs.reduce((a,s) => a + Number(s.units), 0)
           const totalLec     = loadSubs.reduce((a,s) => a + Number(s.lec_hours), 0)
           const totalLab     = loadSubs.reduce((a,s) => a + Number(s.lab_hours), 0)
-          const totalCredit  = loadSubs.reduce((a,s) => a + unitCredit(s.lec_hours,s.lab_hours), 0)
+          const totalCredit  = loadSubs.reduce((a,s) => a + creditOf(s), 0)
           const totalContact = loadSubs.reduce((a,s) => a + contactHours(s.lec_hours,s.lab_hours), 0)
 
           // Non-teaching loads for this instructor — administrative, research,
@@ -231,7 +232,7 @@ function PrintView({ entries, adminLoads, year, semester, onClose }) {
                         <td style={{...td,textAlign:'center'}}>{s.units}</td>
                         <td style={{...td,textAlign:'center'}}>{s.lec_hours}</td>
                         <td style={{...td,textAlign:'center'}}>{s.lab_hours}</td>
-                        <td style={{...td,textAlign:'center'}}>{unitCredit(s.lec_hours,s.lab_hours).toFixed(2)}</td>
+                        <td style={{...td,textAlign:'center'}}>{creditOf(s).toFixed(2)}</td>
                         <td style={{...td,textAlign:'center'}}>{contactHours(s.lec_hours,s.lab_hours)}</td>
                         <td style={td}>{s.room || ''}</td>
                       </tr>
@@ -608,7 +609,7 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
 
               {/* Computed preview */}
               <div className="bg-green-50 rounded-xl px-4 py-2 text-xs text-green-800 flex gap-4">
-                <span>Unit Credit: <strong>{unitCredit(form.lec_hours,form.lab_hours).toFixed(2)}</strong></span>
+                <span>Unit Credit: <strong>{creditOf(form).toFixed(2)}</strong></span>
                 <span>Contact Hours: <strong>{contactHours(form.lec_hours,form.lab_hours)}</strong></span>
               </div>
             </>
@@ -952,9 +953,23 @@ export default function FacultyLoad() {
     } catch { setScheduleByEntry({}) }
   }
 
+  // Whether each instructor has confirmed their load, shown on their card.
+  const [confByInstructor, setConfByInstructor] = useState({})
+  const fetchConfirmations = async () => {
+    try {
+      const r = await facultyLoadAPI.confirmations(loadYear, loadSem)
+      const map = {}
+      r.data.confirmed.forEach(i => { map[i.id] = { status: 'confirmed', at: i.confirmed_at } })
+      r.data.pending.forEach(i => { map[i.id] = { status: 'pending' } })
+      r.data.not_asked.forEach(i => { map[i.id] = { status: 'not_asked' } })
+      setConfByInstructor(map)
+    } catch { setConfByInstructor({}) }
+  }
+
   useEffect(() => {
     if (tab === 'loading') {
       fetchEntries()
+      fetchConfirmations()
       fetchProspectusSubjects()
       fetchTermStatus()
       fetchSectionCounts()
@@ -1266,7 +1281,7 @@ export default function FacultyLoad() {
   // this has to be checked before submitting (mirrors the server-side guard).
   const groupCredit = (grp) => {
     // NSTP does not count toward the unit-credit cap.
-    const totalCredit = grp.entries.filter(e=>!isNstp(e.course_code)).reduce((a,e)=>a+unitCredit(e.lec_hours,e.lab_hours),0)
+    const totalCredit = grp.entries.filter(e=>!isNstp(e.course_code)).reduce((a,e)=>a+creditOf(e),0)
     const otherCredit  = grp.instructorId ? adminLoads.filter(l => l.instructor_id === grp.instructorId).reduce((a,l)=>a+Number(l.units),0) : 0
     return totalCredit + otherCredit
   }
@@ -1703,7 +1718,7 @@ export default function FacultyLoad() {
                 const totalU        = loadEntries.reduce((a,e)=>a+Number(e.units),0)
                 const totalLec      = loadEntries.reduce((a,e)=>a+Number(e.lec_hours),0)
                 const totalLab      = loadEntries.reduce((a,e)=>a+Number(e.lab_hours),0)
-                const totalCredit   = loadEntries.reduce((a,e)=>a+unitCredit(e.lec_hours,e.lab_hours),0)
+                const totalCredit   = loadEntries.reduce((a,e)=>a+creditOf(e),0)
                 const totalContact  = loadEntries.reduce((a,e)=>a+contactHours(e.lec_hours,e.lab_hours),0)
                 const instructorLoads = isUnassigned ? [] : adminLoads.filter(l => l.instructor_id === grp.instructorId)
                 // Other Loads have no lec/lab hours — their unit credit is just their unit value directly
@@ -1737,6 +1752,16 @@ export default function FacultyLoad() {
                           )}
                           {isUnassigned && <span className="ml-2 text-xs bg-amber-200 text-amber-900 font-semibold px-2 py-0.5 rounded-full">Needs Assignment</span>}
                           {!isUnassigned && grp.entries[0]?.instructor_is_placeholder ? <span className="ml-2 text-xs bg-indigo-200 text-indigo-900 font-semibold px-2 py-0.5 rounded-full">Placeholder</span> : null}
+                          {!isUnassigned && !grp.entries[0]?.instructor_is_placeholder && (() => {
+                            const c = confByInstructor[grp.instructorId]
+                            if (!c) return null
+                            const look = c.status === 'confirmed'
+                              ? { cls: 'bg-green-200 text-green-900', text: `✓ Confirmed${c.at ? ' ' + new Date(c.at).toLocaleDateString() : ''}`, title: 'Confirmed their load for this term.' }
+                              : c.status === 'pending'
+                                ? { cls: 'bg-amber-200 text-amber-900', text: 'Waiting to confirm', title: 'Has the load in front of them and hasn’t answered yet.' }
+                                : { cls: 'bg-gray-200 text-gray-700', text: 'Not sent yet', title: 'Assigned here, but not yet on a submitted load.' }
+                            return <span title={look.title} className={`ml-2 text-xs font-semibold px-2 py-0.5 rounded-full ${look.cls}`}>{look.text}</span>
+                          })()}
                           {overMax && (
                             <span
                               title={`${grandCredit.toFixed(2)} unit credit — over the ${MAX_UNITS}-unit hard cap. Unassign a subject or reduce their other load before submitting.`}
@@ -1832,7 +1857,7 @@ export default function FacultyLoad() {
                                 <td className="px-4 py-2.5 text-center text-gray-600 text-xs">{e.units}</td>
                                 <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{e.lec_hours}</td>
                                 <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{e.lab_hours}</td>
-                                <td className="px-4 py-2.5 text-center text-blue-600 text-xs font-semibold">{unitCredit(e.lec_hours,e.lab_hours).toFixed(2)}</td>
+                                <td className="px-4 py-2.5 text-center text-blue-600 text-xs font-semibold">{creditOf(e).toFixed(2)}</td>
                                 <td className="px-4 py-2.5 text-center text-gray-600 text-xs">{contactHours(e.lec_hours,e.lab_hours)}</td>
                                 {/* Inline-editable Room */}
                                 <td className="px-2 py-1.5 text-xs">
