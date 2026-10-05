@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import { facultyLoadAPI } from '../../services/api.js'
 import toast from 'react-hot-toast'
-import { Loader2, ClipboardList, Printer } from 'lucide-react'
+import { Loader2, ClipboardList, Printer, Download } from 'lucide-react'
 
 const SEM_LABEL = { 1: '1st Semester', 2: '2nd Semester', 3: 'Summer' }
 
@@ -13,6 +13,23 @@ function unitCredit(lec, lab) { return Number(lec || 0) + Number(lab || 0) * 0.7
 function isNstp(code) { return /^NSTP\b/i.test(String(code || '').trim()) }
 
 export default function InstructorMyLoad() {
+  const [excelBusy, setExcelBusy] = useState(false)
+  const downloadExcel = async () => {
+    setExcelBusy(true)
+    try {
+      const r = await facultyLoadAPI.myLoadExcel(year, semester)
+      const url = URL.createObjectURL(new Blob([r.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `IFL_${year}_Sem${semester}.xlsx`
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Could not create the Excel file. Please try again.')
+    } finally {
+      setExcelBusy(false)
+    }
+  }
   const [year, setYear]         = useState('2026-2027')
   const [semester, setSemester] = useState(1)
   const [entries, setEntries]   = useState([])
@@ -52,10 +69,16 @@ export default function InstructorMyLoad() {
           title="My Individual Faculty Load"
           subtitle="Every subject currently assigned to you, across every Program Chair you teach for."
         />
-        <button onClick={() => window.print()}
-          className="flex items-center gap-2 bg-amber-400 hover:bg-amber-300 text-green-900 font-bold px-4 py-1.5 rounded-lg transition text-sm shrink-0">
-          <Printer className="w-4 h-4" /> Print
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={downloadExcel} disabled={excelBusy}
+            className="flex items-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-bold px-4 py-1.5 rounded-lg transition text-sm">
+            {excelBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Excel
+          </button>
+          <button onClick={() => window.print()}
+            className="flex items-center gap-2 bg-amber-400 hover:bg-amber-300 text-green-900 font-bold px-4 py-1.5 rounded-lg transition text-sm">
+            <Printer className="w-4 h-4" /> Print
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-end gap-3 mb-5 print:hidden">

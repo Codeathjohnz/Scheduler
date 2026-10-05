@@ -4,6 +4,7 @@ import { authenticate, authorize } from '../middleware/auth.js'
 import { generateFacultyLoadingDocx } from '../utils/facultyLoadingDocx.js'
 import { hasDeptGrant, grantedDepartments } from '../utils/deptAccess.js'
 import { programKey } from '../utils/detectProgram.js'
+import { buildIflWorkbook } from '../utils/iflExcel.js'
 import { notify } from '../utils/notify.js'
 
 const router = Router()
@@ -874,6 +875,51 @@ router.get('/confirmations', authenticate, authorize('chair'), async (req, res) 
       else out.not_asked.push(i)
     }
     res.json(out)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+// GET /api/faculty-load/my-load.xlsx?year=&semester=  — the calling person's
+// Individual Faculty Load as an Excel sheet, in the institution's own layout
+// (timetable on the left, summary of load on the right, sign-off below).
+router.get('/my-load.xlsx', authenticate, authorize('instructor', 'chair', 'dean'), async (req, res) => {
+  const { year = '2026-2027', semester = 1 } = req.query
+  try {
+    const [[me]] = await pool.query('SELECT name, department, role FROM users WHERE id = ?', [req.user.id])
+    const [entries] = await pool.query(`
+      SELECT fle.* FROM faculty_load_entries fle
+      WHERE fle.academic_year = ? AND fle.semester = ? AND fle.assigned_instructor_id = ?
+      ORDER BY fle.sort_order, fle.id`, [year, semester, req.user.id])
+    const [sessions] = await pool.query(`
+      SELECT gs.days, gs.start_time, gs.end_time, gs.session_type,
+             fle.course_code, fle.program_yr_sec,
+             CASE WHEN r.id IS NULL THEN NULL ELSE CONCAT(r.building, ' ', r.room_number) END AS room
+      FROM generated_schedules gs
+      JOIN faculty_load_entries fle ON fle.id = gs.faculty_entry_id
+      LEFT JOIN rooms r ON r.id = gs.room_id
+      WHERE fle.assigned_instructor_id = ? AND fle.academic_year = ? AND fle.semester = ?`,
+      [req.user.id, year, semester])
+    const [adminLoads] = await pool.query(`
+      SELECT load_type, description, units, hours FROM faculty_admin_loads
+      WHERE academic_year = ? AND semester = ? AND instructor_id = ?`, [year, semester, req.user.id])
+
+    // Signatories come from the accounts already in the system, not typed in.
+    const [[dean]] = await pool.query("SELECT name FROM users WHERE role = 'dean' AND department = ? AND is_placeholder = 0 LIMIT 1", [me.department || ''])
+    const [[registrar]] = await pool.query("SELECT name FROM users WHERE role = 'admin' AND is_placeholder = 0 ORDER BY id LIMIT 1")
+    const [[vpaa]] = await pool.query("SELECT name FROM users WHERE role = 'vpaa' AND is_placeholder = 0 ORDER BY id LIMIT 1")
+
+    const wb = await buildIflWorkbook({
+      instructor: { name: me.name, department: me.department },
+      semester: Number(semester), year,
+      sessions, entries, adminLoads,
+      signatories: { dean: dean?.name || '', registrar: registrar?.name || '', vpaa: vpaa?.name || '' },
+    })
+    const buf = await wb.xlsx.writeBuffer()
+    const safe = String(me.name || 'IFL').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '')
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition', `attachment; filename="IFL_${safe}_${year}_Sem${semester}.xlsx"`)
+    res.send(Buffer.from(buf))
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
