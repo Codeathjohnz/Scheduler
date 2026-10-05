@@ -133,6 +133,11 @@ export default function LoginPage() {
           <p className="text-green-200 text-sm mt-6 leading-relaxed">
             AI-Powered Room Scheduling &amp; Conflict-Aware Management Platform
           </p>
+          <p className="text-green-300/90 text-xs mt-4 leading-relaxed max-w-md">
+            Uses automated scheduling techniques, a branch of artificial intelligence, to build conflict-free class timetables.
+            It checks room types, building reservations, instructor loads, and accessibility needs at the same time, and produces
+            a schedule in minutes instead of days. It doesn't learn from users or answer questions; it applies the scheduling rules it was built with.
+          </p>
         </div>
 
         <p className="relative text-green-400 text-xs">
