@@ -1,3 +1,4 @@
+import { creditOf } from '../utils/unitCredit.js'
 import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
@@ -44,7 +45,7 @@ async function withLoad(rows) {
     const key = `${r.academic_year}|${r.semester}`
     if (!maps.has(key)) maps.set(key, await getCombinedLoadMap(r.academic_year, r.semester))
     const current = maps.get(key)[r.instructor_id] || 0
-    const add = credit(r.lec_hours, r.lab_hours)
+    const add = creditOf(r)
     const dept_approved = await hasDeptGrant(r.requested_by, r.instructor_dept, r.academic_year, r.semester)
     out.push({ ...r, dept_approved, current_units: current, unit_credit: add, projected_units: current + add, target_units: TARGET_UNITS, max_units: MAX_UNITS })
   }
@@ -91,7 +92,7 @@ async function finalize(r, homeApproverId) {
     return 'This subject was already assigned to someone else, so the request was closed.'
   }
   const load = (await getCombinedLoadMap(r.academic_year, r.semester))[r.instructor_id] || 0
-  const add = credit(r.lec_hours, r.lab_hours)
+  const add = creditOf(r)
   if (load + add > MAX_UNITS) {
     return `This would put ${r.instructor_name} at ${(load + add).toFixed(2)} units, over the ${MAX_UNITS}-unit cap.`
   }
@@ -262,7 +263,7 @@ router.patch('/:id/respond', authenticate, authorize('instructor', 'chair', 'dea
     }
 
     const load = (await getCombinedLoadMap(r.academic_year, r.semester))[req.user.id] || 0
-    const add = credit(r.lec_hours, r.lab_hours)
+    const add = creditOf(r)
     if (load + add > MAX_UNITS) {
       return res.status(400).json({ message: `Accepting would put you at ${(load + add).toFixed(2)} units, over the ${MAX_UNITS}-unit cap. Decline, or free up load first.` })
     }

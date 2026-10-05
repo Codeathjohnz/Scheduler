@@ -1,3 +1,4 @@
+import { creditOf as subjectCredit } from '../utils/unitCredit.js'
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
@@ -34,7 +35,7 @@ const POOLS = [['General Education', /^GE\b/i], ['PATHFIT', /^PATHFIT\b/i], ['NS
 const poolOf = (code) => POOLS.find(([, re]) => re.test(String(code || '').trim()))?.[0] || null
 const isNstp = (code) => /^NSTP\b/i.test(String(code || '').trim())
 // Unit credit toward the cap: Lec + Lab×0.75; NSTP never counts (same rule as the rest of the system).
-const creditOf = (e) => isNstp(e.course_code) ? 0 : Number(e.lec_hours || 0) + Number(e.lab_hours || 0) * 0.75
+const creditOf = (e) => isNstp(e.course_code) ? 0 : subjectCredit(e)
 const norm = (s) => String(s || '').trim().toUpperCase()
 const SEM = { 1: '1st', 2: '2nd', 3: 'Summer' }
 
