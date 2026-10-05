@@ -300,11 +300,14 @@ router.post('/import-students', authenticate, authorize('admin'), async (req, re
   const skipped = []
   try {
     for (const raw of list) {
-      const studentId = String(raw.student_id || '').trim()
       const email = String(raw.email || '').trim().toLowerCase()
       const section = String(raw.section || '').trim().replace(/-/g, ' ').replace(/\s+/g, ' ')
-      const label = `${studentId} ${raw.last_name || ''}`.trim()
-      if (!studentId || !raw.last_name || !raw.first_name) { skipped.push({ label, reason: 'Missing name or student ID.' }); continue }
+      const studentId = String(raw.student_id || '').trim() || email.split('@')[0]
+      const label = `${studentId} ${raw.last_name || raw.name || ''}`.trim()
+      // Class lists carry a name; account records carry only the email, so the
+      // name is set from the record and can be corrected later on Manage Users.
+      const hasName = raw.name || (raw.first_name && raw.last_name)
+      if (!hasName) { skipped.push({ label, reason: 'Missing name.' }); continue }
       if (!/^[a-z0-9._-]+@adssu\.edu\.ph$/.test(email)) { skipped.push({ label, reason: `Not an institutional email (${email || 'none'}).` }); continue }
       const username = email.slice(0, email.indexOf('@'))
 
@@ -312,12 +315,16 @@ router.post('/import-students', authenticate, authorize('admin'), async (req, re
       if (dupe) { skipped.push({ label, reason: 'An account with this email or username already exists.' }); continue }
 
       const program = (section.split(' ')[0] || '').toUpperCase()
-      const name = [raw.first_name, raw.middle_name, raw.last_name].map(x => String(x || '').trim()).filter(Boolean).join(' ')
+      const name = raw.name
+        ? String(raw.name).trim()
+        : [raw.first_name, raw.middle_name, raw.last_name].map(x => String(x || '').trim()).filter(Boolean).join(' ')
+      // A department given with the row (from the program's Program Chair) wins over the built-in mapping.
+      const dept = cleanDept(raw.department) || DEPT_BY_PROGRAM[program] || null
       const password = randomPassword()
       const hash = await bcrypt.hash(password, 10)
       await pool.query(
         'INSERT INTO users (username, password_hash, name, role, department, section, email) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [username, hash, name, 'student', DEPT_BY_PROGRAM[program] || null, section || null, email]
+        [username, hash, name, 'student', dept, section || null, email]
       )
       created.push({ student_id: studentId, name, username, email, section, password })
     }

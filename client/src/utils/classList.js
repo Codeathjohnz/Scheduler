@@ -71,3 +71,72 @@ export function combineClassLists(files) {
 }
 
 export const isInstitutionalEmail = (email) => /^[a-z0-9._-]+@adssu\.edu\.ph$/.test(String(email || ''))
+
+/**
+ * The institutional account record: one sheet per program, each with an
+ * "Email" and a "Year & Section" column (no names). Returns null when the
+ * workbook is a class list instead.
+ */
+export function readAccountRecord(arrayBuffer) {
+  const wb = XLSX.read(arrayBuffer, { type: 'array' })
+  const isRecord = wb.SheetNames.some(n => {
+    const first = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: '' })[0] || []
+    return String(first[0]).trim().toLowerCase() === 'email' && String(first[1]).trim().toLowerCase().startsWith('year')
+  })
+  if (!isRecord) return null
+
+  const records = []
+  for (const sheet of wb.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheet], { header: 1, defval: '' }).slice(1)
+    for (const r of rows) {
+      const email = String(r[0] || '').trim().toLowerCase()
+      const sec = String(r[1] || '').trim().toUpperCase()
+      if (!email && !sec) continue
+      records.push({ email, sec, sheet })
+    }
+  }
+  return records
+}
+
+// Sheet name -> the program as the system writes it ("BSEd-SCIECE" -> "BSED-SCIENCE").
+export function programFromSheet(sheet) {
+  return String(sheet || '').trim().toUpperCase().replace('SCIECE', 'SCIENCE')
+}
+
+// Program key used for matching (ignores case and punctuation).
+export const programKeyOf = (name) => String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+
+// Year from a section like "3C" -> 3.
+const yearOfSec = (sec) => { const m = /^(\d)/.exec(sec || ''); return m ? Number(m[1]) : 99 }
+
+/**
+ * Turns the account-record rows into students, one per email, in their home
+ * section (the lowest year level listed for them). Each one carries the
+ * department of the Program Chair tagged for their program, or is marked
+ * unresolved when no chair has that program yet.
+ */
+export function buildRecordStudents(records, users) {
+  const deptByKey = new Map()
+  for (const u of users) {
+    if (u.role !== 'chair' || !u.department) continue
+    for (const tag of String(u.programs || '').split(',')) {
+      const k = programKeyOf(tag)
+      if (k && !deptByKey.has(k)) deptByKey.set(k, u.department.trim())
+    }
+  }
+  const byEmail = new Map()
+  for (const r of records) {
+    const cur = byEmail.get(r.email)
+    if (!cur || yearOfSec(r.sec) < yearOfSec(cur.sec)) byEmail.set(r.email, r)
+  }
+  return [...byEmail.values()].map(r => {
+    const program = programFromSheet(r.sheet)
+    const dept = deptByKey.get(programKeyOf(program)) || null
+    const username = r.email.split('@')[0]
+    return {
+      student_id: username, name: username, last_name: '', first_name: '', middle_name: '',
+      email: r.email, section: `${program} ${r.sec}`, program, department: dept,
+      unresolved: !dept, in_sections: [], remarks: [],
+    }
+  })
+}
