@@ -57,11 +57,13 @@ const HEADER_LABELS = new Set(['course no', 'course no.', 'course code', 'code',
 
 function parseProspectus(rows) {
   const subjects = []; let yearLevel = 1; let semester = 1
-  const semMap = { FIRST: 1, SECOND: 2, THIRD: 3, SUMMER: 3 }
+  // Headings are written either as words (FIRST, SECOND) or ordinals (1ST, 2ND, 3RD).
+  // Reading only the words made every "2ND SEMESTER" heading fall back to 1st.
+  const semMap = { FIRST: 1, '1ST': 1, '1': 1, SECOND: 2, '2ND': 2, '2': 2, THIRD: 3, '3RD': 3, '3': 3, SUMMER: 3 }
   for (const row of rows) {
     const c2 = String(row[2] || '').trim(); const c3 = String(row[3] || '').trim()
     const match = c2.match(/^(\d+)(?:ST|ND|RD|TH)\s+YEAR\s*[-–]\s*(\w+)\s+SEMESTER/i)
-    if (match) { yearLevel = parseInt(match[1]); semester = semMap[match[2].toUpperCase()] || 1; continue }
+    if (match) { yearLevel = parseInt(match[1]); const word = match[2].toUpperCase(); semester = semMap[word] ?? (parseInt(word, 10) || 1); continue }
     if (!c2 || !c3 || c2 === 'Grade' || !/[A-Za-z]/.test(c2)) continue
     if (HEADER_LABELS.has(c2.toLowerCase()) || c3.toLowerCase() === 'descriptive title') continue
     const units = parseFloat(row[4])
