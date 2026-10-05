@@ -336,20 +336,25 @@ export default function UserManagement() {
 
       {showImport && <StudentImportModal onClose={() => setShowImport(false)} onImported={fetchUsers} />}
 
-      {/* Department filter */}
-      {departments.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-3">
-          {['all', ...departments].map(d => {
-            const on = filterDept === d
-            return (
-              <button key={d} onClick={() => { setFilterDept(d); setFilterProgram('all') }}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${on ? 'bg-green-700 border-green-700 text-white' : 'bg-white border-gray-300 text-gray-600 hover:border-green-500'}`}>
-                {d === 'all' ? 'All departments' : d}
-              </button>
-            )
-          })}
+      {/* College, then program within it: dropdowns, so the list stays tidy */}
+      <div className="flex flex-wrap items-end gap-3 mb-3">
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">College / department</label>
+          <select value={filterDept} onChange={e => { setFilterDept(e.target.value); setFilterProgram('all') }}
+            className="border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-green-500 min-w-[200px]">
+            <option value="all">All departments</option>
+            {departments.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
         </div>
-      )}
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Program</label>
+          <select value={filterProgram} onChange={e => setFilterProgram(e.target.value)} disabled={filterDept === 'all' && filterProgramOptions.length === 0}
+            className="border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-green-500 min-w-[160px] disabled:opacity-50">
+            <option value="all">All programs</option>
+            {filterProgramOptions.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+      </div>
 
       {/* Search & filter */}
       <div className="flex gap-3 mb-4">
@@ -367,13 +372,7 @@ export default function UserManagement() {
           <option value="all">All Roles</option>
           {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
-        {filterProgramOptions.length > 0 && (
-          <select value={filterProgram} onChange={e => setFilterProgram(e.target.value)}
-            className="border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-green-500 transition bg-white">
-            <option value="all">All programs</option>
-            {filterProgramOptions.map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
-        )}
+
       </div>
 
       {/* Users table */}
