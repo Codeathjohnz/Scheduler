@@ -1,10 +1,11 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from '../components/common/Sidebar.jsx'
-import { LayoutDashboard, ClipboardCheck } from 'lucide-react'
+import { LayoutDashboard, ClipboardCheck , Bell} from 'lucide-react'
 
 const nav = [
   { to: '/qa', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/qa/review', icon: ClipboardCheck, label: 'Review Submissions' },
+  { to: '/qa/notifications', icon: Bell, label: 'Notifications' },
 ]
 
 export default function QALayout() {

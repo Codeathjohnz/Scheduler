@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from '../components/common/Sidebar.jsx'
-import { LayoutDashboard, CalendarDays, Accessibility, GraduationCap, Briefcase, CheckSquare, ClipboardList, ArrowLeftRight } from 'lucide-react'
+import { LayoutDashboard, CalendarDays, Accessibility, GraduationCap, Briefcase, CheckSquare, ClipboardList, ArrowLeftRight , Bell} from 'lucide-react'
 
 const nav = [
   { to: '/instructor', icon: LayoutDashboard, label: 'Dashboard' },
@@ -11,6 +11,7 @@ const nav = [
   { to: '/instructor/specialty', icon: GraduationCap, label: 'My Specialty' },
   { to: '/instructor/load-request', icon: Briefcase, label: 'Load Request' },
   { to: '/instructor/accessibility', icon: Accessibility, label: 'Accessibility Request' },
+  { to: '/instructor/notifications', icon: Bell, label: 'Notifications' },
 ]
 
 export default function InstructorLayout() {

@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from '../components/common/Sidebar.jsx'
-import { LayoutDashboard, ClipboardCheck, GraduationCap, Accessibility, CheckSquare, PenTool, ClipboardList, ArrowLeftRight } from 'lucide-react'
+import { LayoutDashboard, ClipboardCheck, GraduationCap, Accessibility, CheckSquare, PenTool, ClipboardList, ArrowLeftRight , Bell} from 'lucide-react'
 
 const nav = [
   { to: '/dean', icon: LayoutDashboard, label: 'Dashboard' },
@@ -11,6 +11,7 @@ const nav = [
   { to: '/dean/specialty', icon: GraduationCap, label: 'My Specialty' },
   { to: '/dean/accessibility', icon: Accessibility, label: 'Accessibility Request' },
   { to: '/dean/signature', icon: PenTool, label: 'My E-Signature' },
+  { to: '/dean/notifications', icon: Bell, label: 'Notifications' },
 ]
 
 export default function DeanLayout() {

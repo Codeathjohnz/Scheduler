@@ -53,6 +53,7 @@ import InstructorSchedule from './pages/instructor/Schedule.jsx'
 import InstructorConfirmLoad from './pages/instructor/ConfirmLoad.jsx'
 import InstructorMyLoad from './pages/instructor/MyLoad.jsx'
 import TeachingRequests from './pages/shared/TeachingRequests.jsx'
+import NotificationsPage from './pages/shared/NotificationsPage.jsx'
 import InstructorSpecialty from './pages/instructor/MySpecialty.jsx'
 import InstructorAccessibility from './pages/instructor/AccessibilityRequest.jsx'
 import InstructorLoadRequest from './pages/instructor/LoadRequest.jsx'
@@ -97,6 +98,7 @@ export default function App() {
           {/* Program Chair */}
           <Route path="/chair" element={<RoleRoute role={ROLES.CHAIR}><ChairLayout /></RoleRoute>}>
             <Route index element={<ChairDashboard />} />
+            <Route path="notifications" element={<NotificationsPage />} />
             <Route path="submission" element={<ChairSubmission />} />
             <Route path="schedule" element={<ChairScheduleView />} />
             <Route path="faculty-load" element={<ChairFacultyLoad />} />
@@ -111,6 +113,7 @@ export default function App() {
           {/* Dean */}
           <Route path="/dean" element={<RoleRoute role={ROLES.DEAN}><DeanLayout /></RoleRoute>}>
             <Route index element={<DeanDashboard />} />
+            <Route path="notifications" element={<NotificationsPage />} />
             <Route path="review" element={<DeanReview />} />
             <Route path="my-load" element={<InstructorMyLoad />} />
             <Route path="teaching-requests" element={<TeachingRequests />} />
@@ -123,6 +126,7 @@ export default function App() {
           {/* Chief Curriculum Planning and Development */}
           <Route path="/chief-cpd" element={<RoleRoute role={ROLES.CHIEF_CPD}><ChiefCPDLayout /></RoleRoute>}>
             <Route index element={<ChiefCPDDashboard />} />
+            <Route path="notifications" element={<NotificationsPage />} />
             <Route path="review" element={<ChiefCPDReview />} />
             <Route path="signature" element={<SignatureSettings />} />
           </Route>
@@ -130,12 +134,14 @@ export default function App() {
           {/* Quality Assurance */}
           <Route path="/qa" element={<RoleRoute role={ROLES.QUALITY_ASSURANCE}><QALayout /></RoleRoute>}>
             <Route index element={<QADashboard />} />
+            <Route path="notifications" element={<NotificationsPage />} />
             <Route path="review" element={<QAReview />} />
           </Route>
 
           {/* VPAA */}
           <Route path="/vpaa" element={<RoleRoute role={ROLES.VPAA}><VPAALayout /></RoleRoute>}>
             <Route index element={<VPAADashboard />} />
+            <Route path="notifications" element={<NotificationsPage />} />
             <Route path="review" element={<VPAAReview />} />
             <Route path="signature" element={<SignatureSettings />} />
           </Route>
@@ -143,6 +149,7 @@ export default function App() {
           {/* Admin/Registrar */}
           <Route path="/admin" element={<RoleRoute role={ROLES.ADMIN}><AdminLayout /></RoleRoute>}>
             <Route index element={<AdminDashboard />} />
+            <Route path="notifications" element={<NotificationsPage />} />
             <Route path="users" element={<AdminUserManagement />} />
             <Route path="validation" element={<AdminValidation />} />
             <Route path="rooms" element={<AdminRooms />} />
@@ -155,6 +162,7 @@ export default function App() {
           {/* Instructor */}
           <Route path="/instructor" element={<RoleRoute role={ROLES.INSTRUCTOR}><InstructorLayout /></RoleRoute>}>
             <Route index element={<InstructorDashboard />} />
+            <Route path="notifications" element={<NotificationsPage />} />
             <Route path="schedule" element={<InstructorSchedule />} />
             <Route path="my-load" element={<InstructorMyLoad />} />
             <Route path="teaching-requests" element={<TeachingRequests />} />
@@ -167,6 +175,7 @@ export default function App() {
           {/* Student */}
           <Route path="/student" element={<RoleRoute role={ROLES.STUDENT}><StudentLayout /></RoleRoute>}>
             <Route index element={<StudentDashboard />} />
+            <Route path="notifications" element={<NotificationsPage />} />
             <Route path="schedule" element={<StudentSchedule />} />
           </Route>
 

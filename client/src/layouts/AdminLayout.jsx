@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from '../components/common/Sidebar.jsx'
-import { LayoutDashboard, ShieldCheck, DoorOpen, Accessibility, Users, CalendarClock } from 'lucide-react'
+import { LayoutDashboard, ShieldCheck, DoorOpen, Accessibility, Users, CalendarClock , Bell} from 'lucide-react'
 
 const nav = [
   { to: '/admin',                    icon: LayoutDashboard, label: 'Dashboard' },
@@ -9,6 +9,7 @@ const nav = [
   { to: '/admin/rooms',              icon: DoorOpen,        label: 'Manage Rooms' },
   { to: '/admin/schedule-generator', icon: CalendarClock,   label: 'Schedule Generator' },
   { to: '/admin/accessibility',      icon: Accessibility,   label: 'Accessibility Requests' },
+  { to: '/admin/notifications', icon: Bell, label: 'Notifications' },
 ]
 
 export default function AdminLayout() {

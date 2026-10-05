@@ -31,4 +31,87 @@ router.post('/login', async (req, res) => {
   }
 })
 
+// ── Google sign-in ───────────────────────────────────────────────────────────
+// Only an institutional account gets in: the Google account must have a
+// verified @adssu.edu.ph address AND that address must already belong to a
+// user in this system (the Admin adds it on Manage Users). Anything else is
+// turned away with a message, never silently created.
+//   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET — from the Google Cloud console
+//   PUBLIC_URL (optional) — this site's address, e.g. https://adssu.example
+const INSTITUTIONAL_DOMAIN = 'adssu.edu.ph'
+
+function siteBase(req) {
+  return (process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '')
+}
+
+// Sends the user to Google's sign-in page, limited to the ADSSU domain.
+router.get('/google', (req, res) => {
+  if (!process.env.GOOGLE_CLIENT_ID) {
+    return res.redirect('/login?error=' + encodeURIComponent('Google sign-in is not set up yet. Ask the Admin.'))
+  }
+  const params = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID,
+    redirect_uri: `${siteBase(req)}/api/auth/google/callback`,
+    response_type: 'code',
+    scope: 'openid email profile',
+    hd: INSTITUTIONAL_DOMAIN,          // Google's hint: only this Workspace domain
+    prompt: 'select_account',
+  })
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`)
+})
+
+// Google sends the user back here with a code; we trade it for their identity.
+router.get('/google/callback', async (req, res) => {
+  const fail = (msg) => res.redirect('/login?error=' + encodeURIComponent(msg))
+  if (req.query.error) return fail('Google sign-in was cancelled.')
+  if (!req.query.code || !process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return fail('Google sign-in is not set up yet. Ask the Admin.')
+  }
+  try {
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code: String(req.query.code),
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: `${siteBase(req)}/api/auth/google/callback`,
+        grant_type: 'authorization_code',
+      }),
+    })
+    const tokens = await tokenRes.json()
+    if (!tokens.id_token) return fail('Google sign-in failed. Please try again.')
+
+    // The ID token came straight from Google over TLS in exchange for our secret,
+    // so reading its claims here is sound; we check who it was issued for and who it's about.
+    const claims = JSON.parse(Buffer.from(tokens.id_token.split('.')[1], 'base64url').toString('utf8'))
+    if (claims.aud !== process.env.GOOGLE_CLIENT_ID) return fail('Google sign-in failed. Please try again.')
+    if (!claims.email_verified) return fail('Your Google email is not verified.')
+    const email = String(claims.email || '').toLowerCase()
+    if (!email.endsWith('@' + INSTITUTIONAL_DOMAIN)) {
+      return fail('Use your institutional account (@adssu.edu.ph) to sign in.')
+    }
+
+    const [[user]] = await pool.query(
+      'SELECT id, username, password_hash, role, name, department, section, programs, email, is_placeholder FROM users WHERE LOWER(email) = ? LIMIT 1',
+      [email]
+    )
+    if (!user || user.is_placeholder) {
+      return fail(`${email} is not registered in this system. Ask the Admin to add your account first.`)
+    }
+
+    const token = jwt.sign(
+      { id: user.id, username: user.username, role: user.role, name: user.name, department: user.department, section: user.section },
+      process.env.JWT_SECRET,
+      { expiresIn: '30d' }
+    )
+    const info = { id: user.id, username: user.username, role: user.role, name: user.name, department: user.department, section: user.section, programs: user.programs }
+    // Handed to the login page in the URL fragment (never sent to the server again).
+    const payload = Buffer.from(JSON.stringify({ token, user: info })).toString('base64url')
+    res.redirect(`/login#google=${payload}`)
+  } catch (err) {
+    fail('Google sign-in failed. Please try again.')
+  }
+})
+
 export default router
