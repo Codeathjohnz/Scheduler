@@ -11,6 +11,8 @@
  *
  * Add new steps to the bottom of `steps` — keep them idempotent.
  */
+import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 
 async function columnInfo(pool, table, column) {
   const [[row]] = await pool.query(
@@ -454,6 +456,30 @@ const steps = [
       await pool.query(
         "ALTER TABLE users MODIFY role ENUM('admin','chair','vpaa','instructor','student','dean','quality_assurance','chief_cpd','ge_coordinator') NOT NULL"
       )
+      return true
+    },
+  },
+  // Seed one GE Coordinator account so the role is actually usable the
+  // moment this deploys — rename it (and set a real password) under Manage
+  // Users once a real person is assigned. No password is ever hardcoded in
+  // source: set GE_COORDINATOR_PASSWORD in the environment to choose it, or
+  // leave it unset and a random one is generated and printed ONCE to this
+  // server's own startup log (Dokploy's log viewer, never committed to git).
+  // Only runs if no such account exists yet.
+  {
+    name: "seed a default 'ge_coordinator' account",
+    async run(pool) {
+      const [[existing]] = await pool.query("SELECT COUNT(*) AS n FROM users WHERE role = 'ge_coordinator'")
+      if (existing.n > 0) return false
+      const password = process.env.GE_COORDINATOR_PASSWORD || crypto.randomBytes(9).toString('base64url')
+      const hash = await bcrypt.hash(password, 10)
+      await pool.query(
+        `INSERT INTO users (username, password_hash, name, role, department)
+         VALUES ('ge_coordinator', ?, 'GE Coordinator', 'ge_coordinator', 'General Education')
+         ON DUPLICATE KEY UPDATE role = role`,
+        [hash]
+      )
+      console.log(`[migrate] seeded the 'ge_coordinator' account — username: ge_coordinator, password: ${password} (change this under Manage Users)`)
       return true
     },
   },
