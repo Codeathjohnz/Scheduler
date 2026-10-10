@@ -2,7 +2,7 @@ import { creditOf } from '../../utils/unitCredit.js'
 import { useState, useEffect, useRef, Fragment } from 'react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
-import { prospectusAPI, facultyLoadAPI, submissionsAPI, schedulingAPI, placeholdersAPI } from '../../services/api.js'
+import { prospectusAPI, facultyLoadAPI, submissionsAPI, schedulingAPI, placeholdersAPI, crossDeptAPI, crossDeptChainAPI } from '../../services/api.js'
 import PlaceholdersPanel from './PlaceholdersPanel.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
 import PageHeader from '../../components/ui/PageHeader.jsx'
@@ -490,11 +490,10 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
     lab_hours: editEntry.lab_hours,
     assigned_instructor_id: editEntry.assigned_instructor_id || '',
     room: editEntry.room || '',
-    request_note: '',
   } : {
     subject_id: '', course_code: '', descriptive_title: '',
     program_yr_sec: '', year_level: '', units: 3, lec_hours: 3, lab_hours: 0,
-    assigned_instructor_id: '', room: '', request_note: '',
+    assigned_instructor_id: '', room: '',
   })
 
   const [instructors, setInstructors]   = useState([])
@@ -548,12 +547,11 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
     finally { setSaving(false) }
   }
 
-  const crossDept    = instructors.filter(i => i.cross_dept)
-  const specialists  = instructors.filter(i => i.has_specialty && !i.cross_dept && !i.is_ge && !i.is_pathfit && !i.is_nstp)
+  const specialists  = instructors.filter(i => i.has_specialty && !i.is_ge && !i.is_pathfit && !i.is_nstp)
   const geInstr      = instructors.filter(i => i.is_ge)
   const pathfitInstr = instructors.filter(i => i.is_pathfit)
   const nstpInstr    = instructors.filter(i => i.is_nstp)
-  const others       = instructors.filter(i => !i.has_specialty && !i.cross_dept && !i.is_ge && !i.is_pathfit && !i.is_nstp)
+  const others       = instructors.filter(i => !i.has_specialty && !i.is_ge && !i.is_pathfit && !i.is_nstp)
 
   const roleTag = (i) => i.role === 'chair' ? ' (Chair)' : i.role === 'dean' ? ' (Dean)' : ''
 
@@ -663,15 +661,6 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
                   ))}
                 </optgroup>
               )}
-              {crossDept.length > 0 && (
-                <optgroup label="🤝 Other colleges (Dean approved) — they must accept">
-                  {crossDept.map(i => (
-                    <option key={i.id} value={i.id}>
-                      {i.name} [{i.department}]{roleTag(i)}{i.specialty_summary ? ` · ${i.specialty_summary}` : ''} — {i.current_units} units loaded
-                    </option>
-                  ))}
-                </optgroup>
-              )}
               {others.length > 0 && (
                 <optgroup label="Other Instructors">
                   {others.map(i => (
@@ -682,22 +671,10 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
                 </optgroup>
               )}
             </select>
-            {crossDept.some(i => String(i.id) === String(form.assigned_instructor_id)) && (
-              <div className="mt-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 space-y-2">
-                <p className="text-xs text-blue-800">
-                  This instructor belongs to another college, whose Dean has approved your request. Saving sends them a <strong>request</strong> —
-                  the subject stays unassigned and doesn't count toward their load until they accept.
-                </p>
-                <input value={form.request_note} onChange={e=>setForm(f=>({...f,request_note:e.target.value}))} maxLength={255}
-                  placeholder="Why this instructor? e.g. digital innovation in agriculture — 3 units, Mon/Wed"
-                  className="w-full border-2 border-blue-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-blue-500 bg-white" />
-              </div>
-            )}
-            {crossDept.length === 0 && (
-              <p className="text-xs text-gray-500 mt-1">
-                Need an instructor from another college? Ask that college's Dean first under <a href="/chair/teaching-requests" className="text-green-700 font-semibold underline">Teaching Requests</a>.
-              </p>
-            )}
+            <p className="text-xs text-gray-500 mt-1">
+              Need an instructor from another college? Use <strong>Request from another college</strong> below —
+              your Dean, their Dean, and their Chair all weigh in before an instructor is asked.
+            </p>
             {specialists.length > 0 && (
               <p className="text-xs text-green-600 mt-1">
                 ⭐ {specialists.length} instructor{specialists.length>1?'s':''} ha{specialists.length>1?'ve':'s'} selected this subject as their specialty.
@@ -716,6 +693,10 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
               className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
           </div>
 
+          {editEntry && !editEntry.assigned_instructor_id && (
+            <CrossCollegeRequestBox entryId={editEntry.id} year={year} semester={semester} onSent={onClose} />
+          )}
+
           <div className="flex gap-3 pt-1">
             <button onClick={handleSave} disabled={saving}
               className="flex-1 flex items-center justify-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-bold py-2.5 rounded-xl transition text-sm">
@@ -725,6 +706,70 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
               className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-xl transition text-sm">Cancel</button>
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Request an instructor from another college — Chair A's end of the
+   Chair A -> Dean A -> Dean B -> Chair B -> Instructor chain. Only shown on
+   an already-saved, still-unassigned entry (the request needs an entry_id). */
+function CrossCollegeRequestBox({ entryId, year, semester, onSent }) {
+  const [open, setOpen]               = useState(false)
+  const [departments, setDepartments] = useState([])
+  const [target, setTarget]           = useState('')
+  const [note, setNote]               = useState('')
+  const [sending, setSending]         = useState(false)
+
+  const loadDepartments = async () => {
+    try {
+      const res = await crossDeptAPI.accessDepartments(year, semester)
+      setDepartments(res.data.map(d => d.department))
+    } catch { setDepartments([]) }
+  }
+
+  const handleOpen = () => { setOpen(true); loadDepartments() }
+
+  const handleSend = async () => {
+    if (!target) { toast.error('Pick a college to ask.'); return }
+    setSending(true)
+    try {
+      const res = await crossDeptChainAPI.create({ entry_id: entryId, target_department: target, note })
+      toast.success(res.data.message || 'Sent to your Dean.')
+      onSent?.()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not send the request.')
+    } finally { setSending(false) }
+  }
+
+  if (!open) {
+    return (
+      <button type="button" onClick={handleOpen}
+        className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-blue-300 text-blue-700 hover:bg-blue-50 font-semibold py-2.5 rounded-xl transition text-sm">
+        🤝 Request instructor from another college
+      </button>
+    )
+  }
+  return (
+    <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 space-y-2">
+      <p className="text-xs text-blue-800">
+        This goes to your Dean first, who asks that college's Dean, who hands it to one of their Chairs to pick a willing instructor.
+      </p>
+      <select value={target} onChange={e=>setTarget(e.target.value)}
+        className="w-full border-2 border-blue-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-blue-500 bg-white">
+        <option value="">— Pick a college —</option>
+        {departments.map(d => <option key={d} value={d}>{d}</option>)}
+      </select>
+      <input value={note} onChange={e=>setNote(e.target.value)} maxLength={255}
+        placeholder="Why this college? e.g. only they teach advanced networking"
+        className="w-full border-2 border-blue-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-blue-500 bg-white" />
+      <div className="flex gap-2 pt-1">
+        <button type="button" onClick={handleSend} disabled={sending}
+          className="flex-1 bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white font-bold py-2 rounded-lg text-xs">
+          {sending ? 'Sending...' : 'Send to my Dean'}
+        </button>
+        <button type="button" onClick={()=>setOpen(false)}
+          className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2 rounded-lg text-xs">Cancel</button>
       </div>
     </div>
   )

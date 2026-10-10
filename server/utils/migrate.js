@@ -383,6 +383,61 @@ const steps = [
       return true
     },
   },
+  // The full chain for borrowing an instructor from another college:
+  // Chair A -> Dean A -> Dean B -> Chair B -> Instructor, and the instructor's
+  // answer climbs back the same way. Kept separate from the older, simpler
+  // cross_dept_requests/dept_access_requests tables rather than altering them.
+  {
+    name: 'cross_dept_chain + cross_dept_chain_log tables',
+    async run(pool) {
+      const [[t]] = await pool.query(
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cross_dept_chain'"
+      )
+      if (t) return false
+      await pool.query(`
+        CREATE TABLE cross_dept_chain (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          entry_id INT NOT NULL,
+          requested_by INT NOT NULL,
+          requester_department VARCHAR(100) NOT NULL,
+          target_department VARCHAR(100) NOT NULL,
+          note VARCHAR(255) NULL,
+          dean_a_id INT NULL,
+          dean_b_id INT NULL,
+          chair_b_id INT NULL,
+          instructor_id INT NULL,
+          stage ENUM('pending_dean_a','pending_dean_b','pending_chair_b','pending_instructor','finalized','declined','cancelled')
+            NOT NULL DEFAULT 'pending_dean_a',
+          decline_stage VARCHAR(20) NULL,
+          decline_reason VARCHAR(255) NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          dean_a_at TIMESTAMP NULL DEFAULT NULL,
+          dean_b_at TIMESTAMP NULL DEFAULT NULL,
+          chair_b_at TIMESTAMP NULL DEFAULT NULL,
+          instructor_at TIMESTAMP NULL DEFAULT NULL,
+          KEY idx_entry (entry_id),
+          KEY idx_requested_by (requested_by, stage),
+          KEY idx_target_dept (target_department, stage),
+          KEY idx_instructor (instructor_id, stage),
+          CONSTRAINT fk_cdc_entry FOREIGN KEY (entry_id) REFERENCES faculty_load_entries (id) ON DELETE CASCADE,
+          CONSTRAINT fk_cdc_requested_by FOREIGN KEY (requested_by) REFERENCES users (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+      await pool.query(`
+        CREATE TABLE cross_dept_chain_log (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          request_id INT NOT NULL,
+          event VARCHAR(40) NOT NULL,
+          actor_id INT NULL,
+          note VARCHAR(255) NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          KEY idx_request (request_id),
+          CONSTRAINT fk_cdcl_request FOREIGN KEY (request_id) REFERENCES cross_dept_chain (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+      return true
+    },
+  },
 ]
 
 export async function runMigrations(pool) {

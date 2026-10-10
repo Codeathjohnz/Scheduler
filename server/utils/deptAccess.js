@@ -34,3 +34,25 @@ export async function departmentApprovers(department) {
   const [chairs] = await pool.query("SELECT id, role FROM users WHERE department = ? AND role = 'chair' AND is_placeholder = 0", [department])
   return chairs
 }
+
+// The Dean-to-Dean borrowing chain needs one specific Dean per department,
+// not the department/chair fallback above — a department with no Dean yet
+// simply can't be asked, and the chair is told so plainly.
+export async function deanOf(department) {
+  const [[dean]] = await pool.query(
+    "SELECT id, name FROM users WHERE department = ? AND role = 'dean' AND is_placeholder = 0 ORDER BY id LIMIT 1",
+    [department]
+  )
+  return dean || null
+}
+
+// Every chair of a department — a department with more than one program
+// (CCIS has BSIT and BSIS) has more than one, and any of them may pick up
+// an incoming request on behalf of their college.
+export async function chairsOf(department) {
+  const [rows] = await pool.query(
+    "SELECT id, name FROM users WHERE department = ? AND role = 'chair' AND is_placeholder = 0",
+    [department]
+  )
+  return rows
+}

@@ -86,6 +86,24 @@ export const crossDeptAPI = {
   accessCancel:   (id)             => api.delete(`/cross-dept/access/${id}`),
 }
 
+// Borrowing an instructor from another college — the full chain:
+// Chair A -> Dean A -> Dean B -> Chair B -> Instructor, with an instructor
+// decline looping back to Chair B only. See server/routes/crossDeptChain.js.
+export const crossDeptChainAPI = {
+  create:    (data)              => api.post('/cross-dept-chain', data),
+  mine:      ()                  => api.get('/cross-dept-chain/mine'),
+  deanInbox: ()                  => api.get('/cross-dept-chain/dean-inbox'),
+  deanAAct:  (id, action, reason) => api.patch(`/cross-dept-chain/${id}/dean-a`, { action, reason }),
+  deanBAct:  (id, action, reason) => api.patch(`/cross-dept-chain/${id}/dean-b`, { action, reason }),
+  toAssign:  ()                  => api.get('/cross-dept-chain/to-assign'),
+  assign:    (id, instructor_id, note) => api.patch(`/cross-dept-chain/${id}/assign`, { instructor_id, note }),
+  toAnswer:  ()                  => api.get('/cross-dept-chain/to-answer'),
+  respond:   (id, action, reason) => api.patch(`/cross-dept-chain/${id}/respond`, { action, reason }),
+  cancel:    (id)                => api.delete(`/cross-dept-chain/${id}`),
+  get:       (id)                => api.get(`/cross-dept-chain/${id}`),
+  counts:    ()                  => api.get('/cross-dept-chain/counts'),
+}
+
 export const placeholdersAPI = {
   fill:    (academic_year, semester) => api.post('/placeholders/fill', { academic_year, semester }),
   list:    (year, sem)               => api.get(`/placeholders?year=${year}&semester=${sem}`),

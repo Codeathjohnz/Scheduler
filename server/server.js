@@ -21,6 +21,7 @@ import adminRoutes from './routes/admin.js'
 import buildingPriorityRoutes from './routes/buildingPriorities.js'
 import loadRequestRoutes from './routes/loadRequests.js'
 import crossDeptRoutes from './routes/crossDept.js'
+import crossDeptChainRoutes from './routes/crossDeptChain.js'
 import placeholderRoutes from './routes/placeholders.js'
 import notificationRoutes from './routes/notifications.js'
 import pool from './config/db.js'
@@ -50,6 +51,7 @@ app.use('/api/admin', adminRoutes)
 app.use('/api/building-priorities', buildingPriorityRoutes)
 app.use('/api/load-requests', loadRequestRoutes)
 app.use('/api/cross-dept', crossDeptRoutes)
+app.use('/api/cross-dept-chain', crossDeptChainRoutes)
 app.use('/api/placeholders', placeholderRoutes)
 app.use('/api/notifications', notificationRoutes)
 

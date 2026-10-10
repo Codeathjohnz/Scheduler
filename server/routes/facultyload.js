@@ -3,10 +3,8 @@ import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { generateFacultyLoadingDocx } from '../utils/facultyLoadingDocx.js'
-import { hasDeptGrant, grantedDepartments } from '../utils/deptAccess.js'
 import { programKey } from '../utils/detectProgram.js'
 import { buildIflWorkbook } from '../utils/iflExcel.js'
-import { notify } from '../utils/notify.js'
 
 const router = Router()
 
@@ -100,45 +98,23 @@ export async function getCombinedLoadMap(academic_year, semester) {
 }
 
 // ── Teaching for ANOTHER department ─────────────────────────────────────────
-// A chair can't simply assign an instructor from a different department: that
-// person has their own department's students. Instead the chair sends a
-// request (see routes/crossDept.js) — the subject stays UNASSIGNED, so it
-// counts toward nobody's load and doesn't reach the schedule, until the
-// instructor accepts AND their home chair/dean approves. The shared GE, PATHFIT
-// and NSTP pools are exempt: every department draws on them by design.
+// A chair can't assign an instructor from a different department here at all
+// — that's no longer a direct pick. Borrowing one goes through the full
+// chain instead (Chair -> own Dean -> other Dean -> their Chair ->
+// Instructor; see routes/crossDeptChain.js), so this just detects the
+// attempt and points the chair there. The shared GE, PATHFIT and NSTP pools
+// are exempt: every department draws on them by design.
 const POOL_DEPARTMENTS = new Set(['General Education', 'PATHFIT', 'NSTP'])
 
-// Returns the instructor (with id/name/department/cross_dept_open) if assigning
-// them would cross departments for this chair, otherwise null.
-async function crossDeptTarget(chairId, actorRole, instructorId) {
+// Returns the instructor (with id/name/department) if assigning them would
+// cross departments for this chair, otherwise null.
+async function otherDepartmentTarget(chairId, actorRole, instructorId) {
   if (!instructorId || actorRole !== 'chair') return null
   const [[chair]] = await pool.query('SELECT department FROM users WHERE id = ?', [chairId])
-  const [[inst]] = await pool.query(
-    'SELECT id, name, department, role, cross_dept_open FROM users WHERE id = ?', [instructorId]
-  )
+  const [[inst]] = await pool.query('SELECT id, name, department FROM users WHERE id = ?', [instructorId])
   if (!chair || !inst || !inst.department) return null
   if (inst.department === chair.department || POOL_DEPARTMENTS.has(inst.department)) return null
   return inst
-}
-
-// Message if the request can't be made, otherwise null: the instructor must be
-// open to other departments (or have picked this exact subject as a
-// specialty), and this subject must not push them past the hard unit cap.
-async function crossDeptProblem(inst, subjectId, year, semester, credit, chairId) {
-  if (!(await hasDeptGrant(chairId, inst.department, year, semester))) {
-    return `Ask the Dean of ${inst.department} for access first (Teaching Requests → Ask another college). Once they approve, you can pick ${inst.name}.`
-  }
-  const [[spec]] = subjectId
-    ? await pool.query('SELECT COUNT(*) AS n FROM instructor_specialties WHERE instructor_id = ? AND subject_id = ?', [inst.id, subjectId])
-    : [[{ n: 0 }]]
-  if (!inst.cross_dept_open && !spec.n) {
-    return `${inst.name} hasn't said they're open to teaching for other departments.`
-  }
-  const load = (await getCombinedLoadMap(year, semester))[inst.id] || 0
-  if (load + credit > MAX_UNITS) {
-    return `${inst.name} is already at ${load.toFixed(2)} units — this ${credit.toFixed(2)}-unit subject would put them over the ${MAX_UNITS}-unit cap.`
-  }
-  return null
 }
 
 // A same-department instructor who has tagged specific programs (users.programs,
@@ -146,8 +122,7 @@ async function crossDeptProblem(inst, subjectId, year, semester, credit, chairId
 // program they didn't pick — this is the "wrong subject" bug: a BSIS-only
 // instructor ending up on a BSIT chair's load just because they share CCIS.
 // An untagged instructor (programs empty) is open to every program in their
-// department, so nothing is checked for them. Only guards a DIRECT assignment
-// within the SAME department — cross-department picks go through crossDeptProblem instead.
+// department, so nothing is checked for them.
 async function programMismatchProblem(instructorId, subjectId) {
   if (!instructorId || !subjectId) return null
   const [[inst]] = await pool.query('SELECT name, department, programs FROM users WHERE id = ?', [instructorId])
@@ -158,33 +133,6 @@ async function programMismatchProblem(instructorId, subjectId) {
   const allowed = inst.programs.split(',').map(programKey)
   if (allowed.includes(programKey(subj.program))) return null
   return `${inst.name} teaches for ${inst.programs} — this subject belongs to the ${subj.program} prospectus. Pick an instructor tagged for ${subj.program} (My Specialty), or untag them from ${inst.programs} first if that's wrong.`
-}
-
-async function cancelOpenCrossDeptRequests(entryId) {
-  await pool.query(
-    "UPDATE cross_dept_requests SET status = 'cancelled' WHERE entry_id = ? AND status IN ('pending_instructor', 'pending_home')",
-    [entryId]
-  )
-}
-
-async function createCrossDeptRequest(entryId, instructorId, chairId, note) {
-  await cancelOpenCrossDeptRequests(entryId)
-  await pool.query(
-    'INSERT INTO cross_dept_requests (entry_id, instructor_id, requested_by, note) VALUES (?, ?, ?, ?)',
-    [entryId, instructorId, chairId, note ? String(note).slice(0, 255) : null]
-  )
-  const [[info]] = await pool.query(
-    `SELECT e.course_code, e.program_yr_sec, c.name AS chair_name, c.department AS chair_dept, i.role AS instructor_role
-     FROM faculty_load_entries e JOIN users c ON c.id = ? JOIN users i ON i.id = ? WHERE e.id = ?`,
-    [chairId, instructorId, entryId]
-  )
-  if (info) {
-    await notify([instructorId], {
-      type: 'teaching_request', refId: entryId, link: `/${info.instructor_role}/teaching-requests`,
-      title: `${info.chair_name} (${info.chair_dept}) asked you to teach ${info.course_code} ${info.program_yr_sec}`,
-      body: note ? String(note).slice(0, 255) : 'Open Teaching Requests to accept or decline.',
-    })
-  }
 }
 
 // GET /api/faculty-load/section-counts?year=&semester=  — { [year_level]: section_count }
@@ -340,30 +288,21 @@ router.get('/instructors/:subjectId', authenticate, authorize('chair', 'admin'),
 
     // GE subjects only show GE instructors, PATHFIT subjects only show PATHFIT
     // instructors, NSTP subjects only show NSTP instructors, and major
-    // subjects only show instructors from the chair's own department — plus
-    // anyone from another department who explicitly selected this exact
-    // subject as their specialty (e.g. covering overflow).
-    // Instructors from OTHER departments who said they're open to it (My
-    // Specialty) are listed too, flagged cross_dept — picking one sends them a
-    // request rather than assigning directly.
+    // subjects only show instructors from the chair's own department — this
+    // picker never reaches into another department at all; borrowing an
+    // instructor from elsewhere goes through Teaching Requests -> Request an
+    // Instructor (the Dean-to-Dean chain in routes/crossDeptChain.js) instead.
     // A department that runs more than one program (e.g. CCIS has BSIT and
     // BSIS) can have instructors who only teach for one of them (users.programs).
-    // Same-department instructors are only offered here if this subject's own
-    // program is one they teach for — an untagged instructor (programs empty)
-    // is open to every program in the department, as documented on the column.
+    // An untagged instructor (programs empty) is open to every program in the
+    // department, as documented on the column.
     const [[me]] = await pool.query('SELECT department FROM users WHERE id = ?', [req.user.id])
-    let deptCondition, deptParams
-    if (requiredDept) {
-      deptCondition = 'u.department = ?'
-      deptParams = [requiredDept]
-    } else {
-      deptCondition = `((u.department = ? AND (u.programs IS NULL OR u.programs = '' OR ? IS NULL OR FIND_IN_SET(?, u.programs))) OR EXISTS (
-        SELECT 1 FROM instructor_specialties isp2
-        WHERE isp2.instructor_id = u.id AND isp2.subject_id = ?
-      ) OR (u.cross_dept_open = 1 AND u.department IS NOT NULL
-            AND u.department NOT IN ('General Education', 'PATHFIT', 'NSTP')))`
-      deptParams = [me?.department, subject?.program || null, subject?.program || null, req.params.subjectId]
-    }
+    const deptCondition = requiredDept
+      ? 'u.department = ?'
+      : `(u.department = ? AND (u.programs IS NULL OR u.programs = '' OR ? IS NULL OR FIND_IN_SET(?, u.programs)))`
+    const deptParams = requiredDept
+      ? [requiredDept]
+      : [me?.department, subject?.program || null, subject?.program || null]
 
     const [instructors] = await pool.query(`
       SELECT u.id, u.name, u.department, u.role,
@@ -382,19 +321,7 @@ router.get('/instructors/:subjectId', authenticate, authorize('chair', 'admin'),
       ORDER BY has_specialty DESC, specialty_priority ASC, u.name ASC
     `, [req.params.subjectId, req.params.subjectId, ...deptParams])
 
-    // Other colleges' instructors only appear once that college's Dean has
-    // approved this chair's access request for the term.
-    const granted = await grantedDepartments(req.user.id, year, semester)
-    const visible = instructors.filter(i => requiredDept || i.department === me?.department
-      || POOL_DEPARTMENTS.has(i.department) || granted.has(i.department))
-
-    const result = visible.map(i => ({
-      ...i,
-      current_units: loadMap[i.id] || 0,
-      has_specialty: i.has_specialty > 0,
-      cross_dept: !requiredDept && !!me?.department && i.department !== me.department
-        && !['General Education', 'PATHFIT', 'NSTP'].includes(i.department),
-    }))
+    const result = instructors.map(i => ({ ...i, current_units: loadMap[i.id] || 0, has_specialty: i.has_specialty > 0 }))
 
     res.json(result)
   } catch (err) {
@@ -421,7 +348,7 @@ router.get('/instructors-all', authenticate, authorize('chair', 'admin'), async 
 // course_code/descriptive_title/units/lec_hours/lab_hours are always derived
 // server-side from that prospectus row, never trusted from the client.
 router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => {
-  const { academic_year, semester, program_yr_sec, year_level, assigned_instructor_id, room, subject_id, request_note } = req.body
+  const { academic_year, semester, program_yr_sec, year_level, assigned_instructor_id, room, subject_id } = req.body
   if (!subject_id) {
     return res.status(400).json({ message: 'Please select a subject from the uploaded prospectus.' })
   }
@@ -430,12 +357,12 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
     if (!subject) {
       return res.status(400).json({ message: 'That subject was not found in the uploaded prospectus.' })
     }
-    // Another department's instructor → send a request instead of assigning.
-    const cross = await crossDeptTarget(req.user.id, req.user.role, assigned_instructor_id)
+    // Another department's instructor → that's not a direct pick here at all.
+    const cross = await otherDepartmentTarget(req.user.id, req.user.role, assigned_instructor_id)
     if (cross) {
-      const problem = await crossDeptProblem(cross, subject_id, academic_year, semester, creditOf(subject), req.user.id)
-      if (problem) return res.status(400).json({ message: problem })
-    } else if (assigned_instructor_id) {
+      return res.status(400).json({ message: `${cross.name} is from ${cross.department} — to borrow them, ask your Dean under Teaching Requests → Request an Instructor. Leave this subject unassigned for now.` })
+    }
+    if (assigned_instructor_id) {
       const problem = await programMismatchProblem(assigned_instructor_id, subject_id)
       if (problem) return res.status(400).json({ message: problem })
     }
@@ -444,11 +371,7 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
         (academic_year, semester, course_code, descriptive_title, program_yr_sec, year_level, units, lec_hours, lab_hours, assigned_instructor_id, room, subject_id, chair_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [academic_year, semester, subject.course_code, subject.descriptive_title, program_yr_sec, year_level || null,
-        subject.units, subject.lec_hours, subject.lab_hours, cross ? null : (assigned_instructor_id || null), room || null, subject_id, req.user.id])
-    if (cross) {
-      await createCrossDeptRequest(r.insertId, cross.id, req.user.id, request_note)
-      return res.status(201).json({ id: r.insertId, pending_request: true, instructor_name: cross.name })
-    }
+        subject.units, subject.lec_hours, subject.lab_hours, assigned_instructor_id || null, room || null, subject_id, req.user.id])
     await syncConfirmation(req.user.id, academic_year, semester, assigned_instructor_id)
     res.status(201).json({ id: r.insertId })
   } catch (err) {
@@ -461,7 +384,7 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
 // absent (e.g. an inline edit of just Section/Room on a legacy entry with no
 // prospectus link), the existing course identity is left untouched.
 router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) => {
-  const { program_yr_sec, year_level, assigned_instructor_id, room, subject_id, request_note } = req.body
+  const { program_yr_sec, year_level, assigned_instructor_id, room, subject_id } = req.body
   try {
     // Only when the instructor is actually being CHANGED: an inline edit of
     // Section/Room re-sends the current (or still-unassigned) value untouched.
@@ -471,25 +394,17 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
     )
     if (!before) return res.status(404).json({ message: 'Entry not found.' })
     const instructorChanged = Number(assigned_instructor_id || 0) !== Number(before.assigned_instructor_id || 0)
-    let cross = null
     if (instructorChanged) {
-      cross = await crossDeptTarget(req.user.id, req.user.role, assigned_instructor_id)
+      const cross = await otherDepartmentTarget(req.user.id, req.user.role, assigned_instructor_id)
       if (cross) {
-        let credit = creditOf(before)
-        let subjId = before.subject_id
-        if (subject_id) {
-          const [[sub]] = await pool.query('SELECT lec_hours, lab_hours, descriptive_title, units FROM prospectus_subjects WHERE id = ?', [subject_id])
-          if (sub) { credit = creditOf(sub); subjId = subject_id }
-        }
-        const problem = await crossDeptProblem(cross, subjId, before.academic_year, before.semester, credit, req.user.id)
-        if (problem) return res.status(400).json({ message: problem })
-      } else if (assigned_instructor_id) {
+        return res.status(400).json({ message: `${cross.name} is from ${cross.department} — to borrow them, ask your Dean under Teaching Requests → Request an Instructor. Leave this subject unassigned for now.` })
+      }
+      if (assigned_instructor_id) {
         const problem = await programMismatchProblem(assigned_instructor_id, subject_id || before.subject_id)
         if (problem) return res.status(400).json({ message: problem })
       }
     }
-    // While a request is pending the entry itself stays unassigned.
-    const finalAssigned = cross ? null : (assigned_instructor_id || null)
+    const finalAssigned = assigned_instructor_id || null
     if (subject_id) {
       const [[subject]] = await pool.query('SELECT * FROM prospectus_subjects WHERE id = ?', [subject_id])
       if (!subject) {
@@ -509,19 +424,12 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
         WHERE id=?
       `, [program_yr_sec, year_level || null, finalAssigned, room || null, req.params.id])
     }
-    if (cross) {
-      await createCrossDeptRequest(Number(req.params.id), cross.id, req.user.id, request_note)
-    } else if (instructorChanged && assigned_instructor_id) {
-      await cancelOpenCrossDeptRequests(req.params.id)   // now assigned directly — any open request is moot
-    }
     const [[entry]] = await pool.query(
       'SELECT chair_id, academic_year, semester, assigned_instructor_id FROM faculty_load_entries WHERE id=?',
       [req.params.id]
     )
     if (entry) await syncConfirmation(entry.chair_id, entry.academic_year, entry.semester, entry.assigned_instructor_id)
-    res.json(cross
-      ? { message: 'Request sent.', pending_request: true, instructor_name: cross.name }
-      : { message: 'Updated.' })
+    res.json({ message: 'Updated.' })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
