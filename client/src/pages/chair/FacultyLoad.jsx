@@ -45,6 +45,8 @@ const MAX_UNITS = 27
 const CONTACT_HRS_MAX = 40
 
 function unitCredit(lec, lab) { return Number(lec) + Number(lab) * 0.75 }
+
+const RETURN_STAGE_LABEL = { dean: 'the Dean', chief_cpd: 'Chief Curriculum Planning and Development', qa: 'Quality Assurance', vpaa: 'the VPAA', admin: 'the Admin/Registrar' }
 function contactHours(lec, lab) { return Number(lec) + Number(lab) }
 // NSTP does not count toward an instructor's unit-credit load (same NSTP
 // prefix convention as the server) — it still lists as an assigned subject,
@@ -1627,8 +1629,13 @@ export default function FacultyLoad() {
                     <Send className="w-4 h-4 text-blue-700 shrink-0" />
                     <div>
                       <p className="text-sm font-semibold text-blue-900">
-                        {status === 'returned' ? 'Submission was returned for revision.' : 'Faculty load is ready for approval.'}
+                        {status === 'returned' ? `Returned${termStatus?.returned_stage ? ` by ${RETURN_STAGE_LABEL[termStatus.returned_stage] || termStatus.returned_stage}` : ''} for revision.` : 'Faculty load is ready for approval.'}
                       </p>
+                      {status === 'returned' && termStatus?.return_reason && (
+                        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-1.5 mb-1">
+                          “{termStatus.return_reason}”
+                        </p>
+                      )}
                       <p className="text-xs text-blue-600 mt-0.5">
                         {!hasAnyAssigned
                           ? 'Assign at least one instructor before submitting.'

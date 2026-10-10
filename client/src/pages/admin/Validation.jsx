@@ -7,6 +7,7 @@ import {
   Loader2, ClipboardList, XCircle, CheckCircle2, Trash2, RotateCcw
 } from 'lucide-react'
 import { submissionsAPI } from '../../services/api.js'
+import ReturnReasonButton from '../../components/common/ReturnReasonButton.jsx'
 
 const STATUS_LABEL = {
   pending_admin: 'Pending Validation',
@@ -58,10 +59,10 @@ export default function AdminValidation() {
     }
   }
 
-  const handleAction = async (id, action) => {
+  const handleAction = async (id, action, reason) => {
     setActing(id)
     try {
-      await submissionsAPI.adminAction(id, action)
+      await submissionsAPI.adminAction(id, action, reason)
       toast.success(
         action === 'validate' ? 'Submission validated. Ready for schedule generation.'
         : action === 'revert' ? 'Reverted to Validated — ready to regenerate.'
@@ -133,7 +134,7 @@ export default function AdminValidation() {
                     loadingEntries={loadingEntries === sub.id}
                     acting={acting === sub.id}
                     onExpand={() => handleExpand(sub.id)}
-                    onAction={(action) => handleAction(sub.id, action)}
+                    onAction={(action, reason) => handleAction(sub.id, action, reason)}
                     onDelete={() => setDeleteTarget(sub)}
                   />
                 ))}
@@ -349,7 +350,7 @@ function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpa
           )}
 
           {onAction && sub.status === 'pending_admin' && (
-            <div className="flex gap-3 mt-1">
+            <div className="flex flex-wrap gap-3 mt-1">
               <button
                 onClick={() => onAction('validate')}
                 disabled={acting}
@@ -361,17 +362,7 @@ function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpa
                 }
                 Validate
               </button>
-              <button
-                onClick={() => onAction('return')}
-                disabled={acting}
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 disabled:opacity-60 text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition"
-              >
-                {acting
-                  ? <Loader2 className="w-4 h-4 animate-spin" />
-                  : <XCircle className="w-4 h-4" />
-                }
-                Return for Revision
-              </button>
+              <ReturnReasonButton busy={acting} onReturn={(reason) => onAction('return', reason)} />
             </div>
           )}
 

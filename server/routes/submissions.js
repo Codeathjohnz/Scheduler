@@ -2,6 +2,28 @@ import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { getCombinedLoadMap, MAX_UNITS } from './facultyload.js'
+import { notify } from '../utils/notify.js'
+
+const STAGE_LABEL = { dean: 'the Dean', chief_cpd: 'Chief Curriculum Planning and Development', qa: 'Quality Assurance', vpaa: 'the VPAA', admin: 'the Admin/Registrar' }
+
+// Requires a reason, records who/why, and tells the chair. Shared by every
+// review stage's "return" action so the chair never sees a bare status flip.
+async function returnSubmission(req, res, { stage, column }) {
+  const reason = String(req.body.reason || '').trim()
+  if (!reason) return res.status(400).json({ message: 'Please give a reason for returning this submission.' })
+  const [[sub]] = await pool.query('SELECT chair_id FROM submissions WHERE id = ?', [req.params.id])
+  if (!sub) return res.status(404).json({ message: 'Submission not found.' })
+  await pool.query(
+    `UPDATE submissions SET status = 'returned', ${column} = NOW(), return_reason = ?, returned_by = ?, returned_stage = ? WHERE id = ?`,
+    [reason, req.user.id, stage, req.params.id]
+  )
+  await notify([sub.chair_id], {
+    type: 'submission_returned', flag: 'attention', link: '/chair/faculty-load',
+    title: `${STAGE_LABEL[stage]} returned your faculty load for revision`,
+    body: reason,
+  })
+  res.json({ message: 'Submission returned.' })
+}
 
 const router = Router()
 
@@ -267,10 +289,10 @@ router.get('/dean', authenticate, authorize('dean'), async (req, res) => {
 // Dean: confirm or return
 router.patch('/:id/dean', authenticate, authorize('dean'), async (req, res) => {
   const { action } = req.body
-  const status = action === 'confirm' ? 'pending_chief_cpd' : 'returned'
   try {
-    await pool.query('UPDATE submissions SET status = ?, dean_action_at = NOW() WHERE id = ?', [status, req.params.id])
-    res.json({ message: `Submission ${status}.` })
+    if (action !== 'confirm') return await returnSubmission(req, res, { stage: 'dean', column: 'dean_action_at' })
+    await pool.query("UPDATE submissions SET status = 'pending_chief_cpd', dean_action_at = NOW() WHERE id = ?", [req.params.id])
+    res.json({ message: 'Submission pending_chief_cpd.' })
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
   }
@@ -347,10 +369,10 @@ router.get('/chief-cpd', authenticate, authorize('chief_cpd'), async (req, res) 
 // Chief CPD: confirm or return
 router.patch('/:id/chief-cpd', authenticate, authorize('chief_cpd'), async (req, res) => {
   const { action } = req.body
-  const status = action === 'confirm' ? 'pending_qa' : 'returned'
   try {
-    await pool.query('UPDATE submissions SET status = ?, chief_cpd_action_at = NOW() WHERE id = ?', [status, req.params.id])
-    res.json({ message: `Submission ${status}.` })
+    if (action !== 'confirm') return await returnSubmission(req, res, { stage: 'chief_cpd', column: 'chief_cpd_action_at' })
+    await pool.query("UPDATE submissions SET status = 'pending_qa', chief_cpd_action_at = NOW() WHERE id = ?", [req.params.id])
+    res.json({ message: 'Submission pending_qa.' })
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
   }
@@ -415,10 +437,10 @@ router.get('/qa', authenticate, authorize('quality_assurance'), async (req, res)
 // Quality Assurance: confirm or return
 router.patch('/:id/qa', authenticate, authorize('quality_assurance'), async (req, res) => {
   const { action } = req.body
-  const status = action === 'confirm' ? 'pending_vpaa' : 'returned'
   try {
-    await pool.query('UPDATE submissions SET status = ?, qa_action_at = NOW() WHERE id = ?', [status, req.params.id])
-    res.json({ message: `Submission ${status}.` })
+    if (action !== 'confirm') return await returnSubmission(req, res, { stage: 'qa', column: 'qa_action_at' })
+    await pool.query("UPDATE submissions SET status = 'pending_vpaa', qa_action_at = NOW() WHERE id = ?", [req.params.id])
+    res.json({ message: 'Submission pending_vpaa.' })
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
   }
@@ -429,7 +451,8 @@ router.get('/my-status', authenticate, authorize('chair'), async (req, res) => {
   const { year, semester } = req.query
   try {
     const [[row]] = await pool.query(
-      `SELECT id, status, created_at, dean_action_at, chief_cpd_action_at, qa_action_at, vpaa_action_at, submission_type
+      `SELECT id, status, created_at, dean_action_at, chief_cpd_action_at, qa_action_at, vpaa_action_at, submission_type,
+              return_reason, returned_stage
        FROM submissions
        WHERE chair_id = ? AND academic_year = ? AND semester = ?
        ORDER BY created_at DESC LIMIT 1`,
@@ -535,10 +558,10 @@ router.get('/:id/entries', authenticate, authorize('vpaa', 'admin', 'chair', 'de
 // VPAA: endorse or return
 router.patch('/:id/vpaa', authenticate, authorize('vpaa'), async (req, res) => {
   const { action } = req.body
-  const status = action === 'endorse' ? 'pending_admin' : 'returned'
   try {
-    await pool.query('UPDATE submissions SET status = ?, vpaa_action_at = NOW() WHERE id = ?', [status, req.params.id])
-    res.json({ message: `Submission ${status}.` })
+    if (action !== 'endorse') return await returnSubmission(req, res, { stage: 'vpaa', column: 'vpaa_action_at' })
+    await pool.query("UPDATE submissions SET status = 'pending_admin', vpaa_action_at = NOW() WHERE id = ?", [req.params.id])
+    res.json({ message: 'Submission pending_admin.' })
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
   }
@@ -591,10 +614,10 @@ router.patch('/:id/admin', authenticate, authorize('admin'), async (req, res) =>
     return res.json({ message: 'Submission reverted to Validated — ready to regenerate.' })
   }
 
-  const status = action === 'validate' ? 'validated' : 'returned'
   try {
-    await pool.query('UPDATE submissions SET status = ?, admin_action_at = NOW() WHERE id = ?', [status, req.params.id])
-    res.json({ message: `Submission ${status}.` })
+    if (action !== 'validate') return await returnSubmission(req, res, { stage: 'admin', column: 'admin_action_at' })
+    await pool.query("UPDATE submissions SET status = 'validated', admin_action_at = NOW() WHERE id = ?", [req.params.id])
+    res.json({ message: 'Submission validated.' })
   } catch (err) {
     res.status(500).json({ message: 'Server error.', error: err.message })
   }

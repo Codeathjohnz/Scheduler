@@ -3,6 +3,7 @@ import PageHeader from '../../components/ui/PageHeader.jsx'
 import toast from 'react-hot-toast'
 import { CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2, ClipboardList, Search, Trash2 } from 'lucide-react'
 import { submissionsAPI } from '../../services/api.js'
+import ReturnReasonButton from '../../components/common/ReturnReasonButton.jsx'
 
 const STATUS_LABEL = {
   pending_vpaa:  'Pending Review',
@@ -64,10 +65,10 @@ export default function VPAAReview() {
     }
   }
 
-  const handleAction = async (id, action) => {
+  const handleAction = async (id, action, reason) => {
     setActing(id)
     try {
-      await submissionsAPI.vpaaAction(id, action)
+      await submissionsAPI.vpaaAction(id, action, reason)
       toast.success(
         action === 'endorse'
           ? 'Submission endorsed and forwarded to Admin/Registrar.'
@@ -137,7 +138,7 @@ export default function VPAAReview() {
                     loadingEntries={loadingEntries === sub.id}
                     acting={acting === sub.id}
                     onExpand={() => handleExpand(sub.id)}
-                    onAction={(action) => handleAction(sub.id, action)}
+                    onAction={(action, reason) => handleAction(sub.id, action, reason)}
                     onDelete={() => setDeleteTarget(sub)}
                   />
                 ))}
@@ -365,7 +366,7 @@ function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpa
 
           {/* Actions — only for pending_vpaa */}
           {onAction && sub.status === 'pending_vpaa' && (
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <button
                 onClick={() => onAction('endorse')}
                 disabled={acting}
@@ -377,17 +378,7 @@ function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpa
                 }
                 Endorse
               </button>
-              <button
-                onClick={() => onAction('return')}
-                disabled={acting}
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 disabled:opacity-60 text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition"
-              >
-                {acting
-                  ? <Loader2 className="w-4 h-4 animate-spin" />
-                  : <XCircle className="w-4 h-4" />
-                }
-                Return for Revision
-              </button>
+              <ReturnReasonButton busy={acting} onReturn={(reason) => onAction('return', reason)} />
             </div>
           )}
 

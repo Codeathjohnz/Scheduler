@@ -365,6 +365,24 @@ const steps = [
       return true
     },
   },
+  // When Dean/Chief CPD/QA/VPAA/Admin returns a submission, the chair needs to
+  // know why and be notified, not just see a status flip to "returned".
+  {
+    name: 'submissions.return_reason / returned_by / returned_stage',
+    async run(pool) {
+      const [[col]] = await pool.query(
+        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'submissions' AND COLUMN_NAME = 'return_reason'"
+      )
+      if (col) return false
+      await pool.query(`
+        ALTER TABLE submissions
+          ADD COLUMN return_reason VARCHAR(255) NULL AFTER status,
+          ADD COLUMN returned_by INT NULL AFTER return_reason,
+          ADD COLUMN returned_stage VARCHAR(20) NULL AFTER returned_by
+      `)
+      return true
+    },
+  },
 ]
 
 export async function runMigrations(pool) {

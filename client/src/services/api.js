@@ -48,8 +48,8 @@ export const submissionsAPI = {
   getForVPAA:            ()             => api.get('/submissions/vpaa'),
   getForAdmin:           ()             => api.get('/submissions/admin'),
   getEntries:            (id)           => api.get(`/submissions/${id}/entries`),
-  vpaaAction:            (id, action)   => api.patch(`/submissions/${id}/vpaa`, { action }),
-  adminAction:           (id, action)   => api.patch(`/submissions/${id}/admin`, { action }),
+  vpaaAction:            (id, action, reason) => api.patch(`/submissions/${id}/vpaa`, { action, reason }),
+  adminAction:           (id, action, reason) => api.patch(`/submissions/${id}/admin`, { action, reason }),
   remove:                (id)           => api.delete(`/submissions/${id}`),
   // Instructor confirmation
   getMyConfirmations:    ()             => api.get('/submissions/my-confirmations'),
@@ -57,15 +57,15 @@ export const submissionsAPI = {
   confirm:               (id)           => api.patch(`/submissions/${id}/confirm`),
   // Dean
   getForDean:            ()             => api.get('/submissions/dean'),
-  deanAction:            (id, action)   => api.patch(`/submissions/${id}/dean`, { action }),
+  deanAction:            (id, action, reason) => api.patch(`/submissions/${id}/dean`, { action, reason }),
   deanRevert:            (id)           => api.patch(`/submissions/${id}/dean-revert`),
   // Chief Curriculum Planning and Development
   getForChiefCPD:        ()             => api.get('/submissions/chief-cpd'),
-  chiefCpdAction:        (id, action)   => api.patch(`/submissions/${id}/chief-cpd`, { action }),
+  chiefCpdAction:        (id, action, reason) => api.patch(`/submissions/${id}/chief-cpd`, { action, reason }),
   chiefCpdRevert:        (id)           => api.patch(`/submissions/${id}/chief-cpd-revert`),
   // Quality Assurance
   getForQA:              ()             => api.get('/submissions/qa'),
-  qaAction:              (id, action)   => api.patch(`/submissions/${id}/qa`, { action }),
+  qaAction:              (id, action, reason) => api.patch(`/submissions/${id}/qa`, { action, reason }),
 }
 
 // Asking an instructor from another department to teach — see server/routes/crossDept.js

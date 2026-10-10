@@ -3,6 +3,7 @@ import PageHeader from '../../components/ui/PageHeader.jsx'
 import toast from 'react-hot-toast'
 import { CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2, ClipboardList, Search, Undo2 } from 'lucide-react'
 import { submissionsAPI } from '../../services/api.js'
+import ReturnReasonButton from '../../components/common/ReturnReasonButton.jsx'
 
 const REVERTIBLE_STATUSES = new Set(['pending_chief_cpd', 'pending_qa', 'pending_vpaa', 'pending_admin', 'validated'])
 
@@ -69,10 +70,10 @@ export default function DeanReview() {
     }
   }
 
-  const handleAction = async (id, action) => {
+  const handleAction = async (id, action, reason) => {
     setActing(id)
     try {
-      await submissionsAPI.deanAction(id, action)
+      await submissionsAPI.deanAction(id, action, reason)
       toast.success(
         action === 'confirm'
           ? 'Submission confirmed and forwarded to Quality Assurance.'
@@ -139,7 +140,7 @@ export default function DeanReview() {
                     loadingEntries={loadingEntries === sub.id}
                     acting={acting === sub.id}
                     onExpand={() => handleExpand(sub.id)}
-                    onAction={(action) => handleAction(sub.id, action)}
+                    onAction={(action, reason) => handleAction(sub.id, action, reason)}
                   />
                 ))}
               </div>
@@ -316,7 +317,7 @@ function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpa
           )}
 
           {onAction && sub.status === 'pending_dean' && (
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <button
                 onClick={() => onAction('confirm')}
                 disabled={acting}
@@ -325,14 +326,7 @@ function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpa
                 {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
                 Confirm
               </button>
-              <button
-                onClick={() => onAction('return')}
-                disabled={acting}
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 disabled:opacity-60 text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition"
-              >
-                {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
-                Return for Revision
-              </button>
+              <ReturnReasonButton busy={acting} onReturn={(reason) => onAction('return', reason)} />
             </div>
           )}
 
