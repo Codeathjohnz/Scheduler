@@ -104,6 +104,14 @@ export const crossDeptChainAPI = {
   counts:    ()                  => api.get('/cross-dept-chain/counts'),
 }
 
+// GE Coordinator — assigns GE instructors centrally across every college.
+// See server/routes/geCoordinator.js.
+export const geCoordinatorAPI = {
+  queue:    (year, sem)              => api.get(`/ge-coordinator/queue?year=${year}&semester=${sem}`),
+  assigned: (year, sem)              => api.get(`/ge-coordinator/assigned?year=${year}&semester=${sem}`),
+  assign:   (entryId, instructor_id) => api.patch(`/ge-coordinator/${entryId}/assign`, { instructor_id }),
+}
+
 export const placeholdersAPI = {
   fill:    (academic_year, semester) => api.post('/placeholders/fill', { academic_year, semester }),
   list:    (year, sem)               => api.get(`/placeholders?year=${year}&semester=${sem}`),

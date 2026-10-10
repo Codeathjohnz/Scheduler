@@ -48,7 +48,7 @@ function unitCredit(lecHours, labHours) {
 // department subjects, which may only go to instructors from the department
 // that owns the prospectus. A subject in one pool may only be taught by an
 // instructor from that same pool's department — never mixed.
-function isGeneralEd(courseCode) {
+export function isGeneralEd(courseCode) {
   return /^GE\b/i.test(String(courseCode || '').trim())
 }
 function isPathfit(courseCode) {
@@ -362,6 +362,9 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
     if (cross) {
       return res.status(400).json({ message: `${cross.name} is from ${cross.department} — to borrow them, ask your Dean under Teaching Requests → Request an Instructor. Leave this subject unassigned for now.` })
     }
+    if (assigned_instructor_id && req.user.role === 'chair' && isGeneralEd(subject.course_code)) {
+      return res.status(400).json({ message: 'GE subjects are assigned by the GE Coordinator, not picked here. Save this unassigned — it will appear in their queue automatically.' })
+    }
     if (assigned_instructor_id) {
       const problem = await programMismatchProblem(assigned_instructor_id, subject_id)
       if (problem) return res.status(400).json({ message: problem })
@@ -389,15 +392,29 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
     // Only when the instructor is actually being CHANGED: an inline edit of
     // Section/Room re-sends the current (or still-unassigned) value untouched.
     const [[before]] = await pool.query(
-      'SELECT assigned_instructor_id, subject_id, lec_hours, lab_hours, descriptive_title, units, academic_year, semester FROM faculty_load_entries WHERE id = ?',
+      'SELECT assigned_instructor_id, subject_id, course_code, lec_hours, lab_hours, descriptive_title, units, academic_year, semester FROM faculty_load_entries WHERE id = ?',
       [req.params.id]
     )
     if (!before) return res.status(404).json({ message: 'Entry not found.' })
+
+    let subject = null
+    if (subject_id) {
+      const [[found]] = await pool.query('SELECT * FROM prospectus_subjects WHERE id = ?', [subject_id])
+      if (!found) {
+        return res.status(400).json({ message: 'That subject was not found in the uploaded prospectus.' })
+      }
+      subject = found
+    }
+    const effectiveCourseCode = subject ? subject.course_code : before.course_code
+
     const instructorChanged = Number(assigned_instructor_id || 0) !== Number(before.assigned_instructor_id || 0)
     if (instructorChanged) {
       const cross = await otherDepartmentTarget(req.user.id, req.user.role, assigned_instructor_id)
       if (cross) {
         return res.status(400).json({ message: `${cross.name} is from ${cross.department} — to borrow them, ask your Dean under Teaching Requests → Request an Instructor. Leave this subject unassigned for now.` })
+      }
+      if (assigned_instructor_id && req.user.role === 'chair' && isGeneralEd(effectiveCourseCode)) {
+        return res.status(400).json({ message: 'GE subjects are assigned by the GE Coordinator, not picked here. Leave this unassigned — it will appear in their queue automatically.' })
       }
       if (assigned_instructor_id) {
         const problem = await programMismatchProblem(assigned_instructor_id, subject_id || before.subject_id)
@@ -405,11 +422,7 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
       }
     }
     const finalAssigned = assigned_instructor_id || null
-    if (subject_id) {
-      const [[subject]] = await pool.query('SELECT * FROM prospectus_subjects WHERE id = ?', [subject_id])
-      if (!subject) {
-        return res.status(400).json({ message: 'That subject was not found in the uploaded prospectus.' })
-      }
+    if (subject) {
       await pool.query(`
         UPDATE faculty_load_entries SET
           course_code=?, descriptive_title=?, program_yr_sec=?, year_level=?, units=?, lec_hours=?, lab_hours=?,
@@ -585,11 +598,13 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
         specialtyMap[sid][prio === 2 ? 2 : 1].push(inst.id)
       }
     }
-    // Partition the pool so GE subjects only draw from GE instructors,
-    // PATHFIT subjects only draw from PATHFIT instructors, NSTP subjects
-    // only draw from NSTP instructors, and major subjects only draw from
-    // department instructors — never mixed.
-    const geInstructorIds      = instructors.filter(i => i.department === 'General Education').map(i => i.id)
+    // Partition the pool so PATHFIT subjects only draw from PATHFIT instructors,
+    // NSTP subjects only draw from NSTP instructors, and major subjects only
+    // draw from department instructors — never mixed. GE subjects are never
+    // auto-assigned here at all: they're left unassigned for the GE
+    // Coordinator, who assigns centrally across every college (see
+    // routes/geCoordinator.js) — picking one here per-chair risked two
+    // colleges independently overloading the same GE instructor.
     const pathfitInstructorIds = instructors.filter(i => i.department === 'PATHFIT').map(i => i.id)
     const nstpInstructorIds    = instructors.filter(i => i.department === 'NSTP').map(i => i.id)
     // An instructor can be tagged with the programs they teach for (e.g. BSIT,
@@ -659,7 +674,7 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
     expandedSubjects.forEach((sub, idx) => {
       const existing = existingMap.get(`${sub.id}|${sub.program_yr_sec}`)
       if (existing?.assigned_instructor_id) return
-      const eligiblePool = isGeneralEd(sub.course_code) ? geInstructorIds
+      const eligiblePool = isGeneralEd(sub.course_code) ? []   // never auto-assigned — left for the GE Coordinator
         : isPathfit(sub.course_code) ? pathfitInstructorIds
         : isNstp(sub.course_code) ? nstpInstructorIds
         : majorInstructorIds

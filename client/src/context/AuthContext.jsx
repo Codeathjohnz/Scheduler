@@ -8,6 +8,7 @@ export const ROLES = {
   DEAN:              'dean',
   CHIEF_CPD:         'chief_cpd',
   QUALITY_ASSURANCE: 'quality_assurance',
+  GE_COORDINATOR:    'ge_coordinator',
   VPAA:              'vpaa',
   ADMIN:             'admin',
   INSTRUCTOR:        'instructor',

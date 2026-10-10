@@ -7,7 +7,7 @@ import toast from 'react-hot-toast'
 import {
   Plus, Pencil, Trash2, X, Eye, EyeOff,
   Users, ShieldCheck, GraduationCap, BookOpen, UserCircle, Loader2, Search,
-  Mail, Building2, Star, IdCard, Award, BadgeCheck, Bookmark, Upload
+  Mail, Building2, Star, IdCard, Award, BadgeCheck, Bookmark, Upload, Leaf
 } from 'lucide-react'
 
 const ROLES = [
@@ -16,6 +16,7 @@ const ROLES = [
   { value: 'dean',       label: 'Dean',                icon: Award,          color: 'bg-indigo-100 text-indigo-700' },
   { value: 'chief_cpd',  label: 'Chief Curriculum Planning and Development', icon: Bookmark, color: 'bg-cyan-100 text-cyan-700' },
   { value: 'quality_assurance', label: 'Quality Assurance', icon: BadgeCheck, color: 'bg-teal-100 text-teal-700' },
+  { value: 'ge_coordinator', label: 'GE Coordinator', icon: Leaf, color: 'bg-lime-100 text-lime-700' },
   { value: 'vpaa',       label: 'VPAA',                icon: UserCircle,     color: 'bg-purple-100 text-purple-700' },
   { value: 'instructor', label: 'Instructor',           icon: BookOpen,       color: 'bg-amber-100 text-amber-700' },
   { value: 'student',    label: 'Student',              icon: Users,          color: 'bg-green-100 text-green-700' },

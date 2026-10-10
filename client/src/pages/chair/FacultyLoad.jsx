@@ -547,6 +547,11 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
     finally { setSaving(false) }
   }
 
+  // GE subjects are assigned centrally by the GE Coordinator — a chair never
+  // picks one directly here, even though the picker endpoint would only ever
+  // return GE instructors for a GE subject anyway.
+  const isGE = /^GE\b/i.test(form.course_code || '')
+  const assignedInstructor = instructors.find(i => String(i.id) === String(form.assigned_instructor_id))
   const specialists  = instructors.filter(i => i.has_specialty && !i.is_ge && !i.is_pathfit && !i.is_nstp)
   const geInstr      = instructors.filter(i => i.is_ge)
   const pathfitInstr = instructors.filter(i => i.is_pathfit)
@@ -616,6 +621,16 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
           )}
 
           {/* Instructor */}
+          {isGE ? (
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Assign Instructor</label>
+              <div className="bg-lime-50 border border-lime-200 rounded-xl px-4 py-3 text-sm text-lime-900">
+                {assignedInstructor
+                  ? <>🎓 <strong>{assignedInstructor.name}</strong> — assigned by the GE Coordinator.</>
+                  : <>🎓 GE subjects are assigned by the <strong>GE Coordinator</strong>, not here. Save this unassigned — it'll appear in their queue automatically, and you'll be notified once they assign someone.</>}
+              </div>
+            </div>
+          ) : (
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">
               Assign Instructor
@@ -684,6 +699,7 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
               <p className="text-xs text-amber-600 mt-1">No instructor has selected this subject as their specialty yet.</p>
             )}
           </div>
+          )}
 
           {/* Room */}
           <div>
@@ -693,7 +709,7 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
               className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
           </div>
 
-          {editEntry && !editEntry.assigned_instructor_id && (
+          {editEntry && !editEntry.assigned_instructor_id && !isGE && (
             <CrossCollegeRequestBox entryId={editEntry.id} year={year} semester={semester} onSent={onClose} />
           )}
 

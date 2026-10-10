@@ -438,6 +438,25 @@ const steps = [
       return true
     },
   },
+  // GE Coordinator: General Education has no department of its own — its
+  // instructors teach every college's students — so instead of each chair
+  // separately drawing from the shared GE pool (risking the same GE
+  // instructor getting picked past their cap by two colleges in the same
+  // hour), one coordinator account assigns every college's GE subjects
+  // centrally. See routes/geCoordinator.js.
+  {
+    name: "users.role ENUM — add 'ge_coordinator'",
+    async run(pool) {
+      const [[col]] = await pool.query(
+        "SELECT COLUMN_TYPE AS t FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'role'"
+      )
+      if (col.t.includes('ge_coordinator')) return false
+      await pool.query(
+        "ALTER TABLE users MODIFY role ENUM('admin','chair','vpaa','instructor','student','dean','quality_assurance','chief_cpd','ge_coordinator') NOT NULL"
+      )
+      return true
+    },
+  },
 ]
 
 export async function runMigrations(pool) {

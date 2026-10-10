@@ -27,6 +27,10 @@ import QALayout from './layouts/QALayout.jsx'
 import QADashboard from './pages/qa/Dashboard.jsx'
 import QAReview from './pages/qa/Review.jsx'
 
+// GE Coordinator pages
+import GECoordinatorLayout from './layouts/GECoordinatorLayout.jsx'
+import GECoordinatorDashboard from './pages/gecoordinator/Dashboard.jsx'
+
 // VPAA pages
 import VPAALayout from './layouts/VPAALayout.jsx'
 import VPAADashboard from './pages/vpaa/Dashboard.jsx'
@@ -80,6 +84,7 @@ function RootRedirect() {
     [ROLES.DEAN]: '/dean',
     [ROLES.CHIEF_CPD]: '/chief-cpd',
     [ROLES.QUALITY_ASSURANCE]: '/qa',
+    [ROLES.GE_COORDINATOR]: '/ge-coordinator',
     [ROLES.VPAA]: '/vpaa',
     [ROLES.ADMIN]: '/admin',
     [ROLES.INSTRUCTOR]: '/instructor',
@@ -139,6 +144,12 @@ export default function App() {
             <Route index element={<QADashboard />} />
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="review" element={<QAReview />} />
+          </Route>
+
+          {/* GE Coordinator */}
+          <Route path="/ge-coordinator" element={<RoleRoute role={ROLES.GE_COORDINATOR}><GECoordinatorLayout /></RoleRoute>}>
+            <Route index element={<GECoordinatorDashboard />} />
+            <Route path="notifications" element={<NotificationsPage />} />
           </Route>
 
           {/* VPAA */}

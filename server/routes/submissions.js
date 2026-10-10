@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
-import { getCombinedLoadMap, MAX_UNITS } from './facultyload.js'
+import { getCombinedLoadMap, MAX_UNITS, isGeneralEd } from './facultyload.js'
 import { notify } from '../utils/notify.js'
 
 const STAGE_LABEL = { dean: 'the Dean', chief_cpd: 'Chief Curriculum Planning and Development', qa: 'Quality Assurance', vpaa: 'the VPAA', admin: 'the Admin/Registrar' }
@@ -80,26 +80,38 @@ router.post('/from-faculty-load', authenticate, authorize('chair'), async (req, 
     // up in a later submission; only entries with a real instructor generate
     // a confirmation row.
     const [entries] = await conn.query(
-      'SELECT assigned_instructor_id FROM faculty_load_entries WHERE chair_id = ? AND academic_year = ? AND semester = ?',
+      'SELECT assigned_instructor_id, course_code FROM faculty_load_entries WHERE chair_id = ? AND academic_year = ? AND semester = ?',
       [req.user.id, academic_year, semester]
     )
     if (entries.length === 0) {
       conn.release()
       return res.status(400).json({ message: 'No faculty load entries found. Add entries in the Faculty Loading Sheet first.' })
     }
-    // Requests to instructors from other departments must be settled first:
-    // an answer arriving after submission wouldn't go through the confirmation
-    // chain the rest of the load is going through.
+    // Requests to borrow an instructor from another college must be settled
+    // first: an answer arriving after submission wouldn't go through the
+    // confirmation chain the rest of the load is going through.
     const [[open]] = await conn.query(
-      `SELECT COUNT(*) AS n FROM cross_dept_requests r
-       JOIN faculty_load_entries e ON e.id = r.entry_id
-       WHERE e.chair_id = ? AND e.academic_year = ? AND e.semester = ? AND r.status IN ('pending_instructor', 'pending_home')`,
+      `SELECT COUNT(*) AS n FROM cross_dept_chain c
+       JOIN faculty_load_entries e ON e.id = c.entry_id
+       WHERE e.chair_id = ? AND e.academic_year = ? AND e.semester = ?
+         AND c.stage NOT IN ('finalized', 'declined', 'cancelled')`,
       [req.user.id, academic_year, semester]
     )
     if (open.n > 0) {
       conn.release()
       return res.status(400).json({
-        message: `You still have ${open.n} teaching request${open.n > 1 ? 's' : ''} waiting on other departments. Wait for the answer (or withdraw it under Teaching Requests) before submitting.`,
+        message: `You still have ${open.n} teaching request${open.n > 1 ? 's' : ''} waiting on another college. Wait for the answer (or withdraw it under Teaching Requests) before submitting.`,
+      })
+    }
+
+    // GE subjects are assigned centrally by the GE Coordinator, not by this
+    // chair — one still unassigned here means it hasn't reached them yet
+    // (or they haven't gotten to it), not that nobody is available.
+    const unassignedGe = entries.filter(e => !e.assigned_instructor_id && isGeneralEd(e.course_code)).length
+    if (unassignedGe > 0) {
+      conn.release()
+      return res.status(400).json({
+        message: `${unassignedGe} GE subject${unassignedGe > 1 ? 's are' : ' is'} still waiting on the GE Coordinator to assign an instructor. Submitting will have to wait until they do.`,
       })
     }
 
