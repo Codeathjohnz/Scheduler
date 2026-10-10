@@ -9,6 +9,7 @@ const REASONS = [
   'I require accessibility-based room assignment.',
   'I have temporary or permanent health conditions affecting mobility.',
 ]
+const OTHER = 'other'
 
 const STATUS_STYLE = {
   pending:  'bg-amber-100 text-amber-800',
@@ -23,7 +24,7 @@ const LEVEL_LABEL = {
 }
 
 export default function InstructorAccessibilityRequest() {
-  const [form, setForm]         = useState({ reason: '', details: '' })
+  const [form, setForm]         = useState({ reason: '', customReason: '', details: '' })
   const [submitting, setSubmitting] = useState(false)
   const [existing, setExisting] = useState(null)
   const [loadingStatus, setLoadingStatus] = useState(true)
@@ -38,11 +39,14 @@ export default function InstructorAccessibilityRequest() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.reason) { toast.error('Please select a reason.'); return }
+    const isOther = form.reason === OTHER
+    const reasonText = isOther ? form.customReason.trim() : form.reason
+    if (isOther && !reasonText) { toast.error('Please describe your reason.'); return }
     setSubmitting(true)
     try {
-      await accessibilityAPI.submit({ reason: form.reason, details: form.details })
+      await accessibilityAPI.submit({ reason: reasonText, details: form.details })
       toast.success('Accessibility request submitted for Admin review.')
-      setExisting({ status: 'pending', reason: form.reason })
+      setExisting({ status: 'pending', reason: reasonText })
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to submit request.')
     } finally {
@@ -74,6 +78,7 @@ export default function InstructorAccessibilityRequest() {
             {existing.status === 'approved' && 'Request Approved'}
             {existing.status === 'rejected' && 'Request Rejected'}
           </h2>
+          {existing.reason && <p className="text-sm italic mb-2">“{existing.reason}”</p>}
           {existing.status === 'pending' && (
             <p className="text-sm">Your request is being reviewed by the Admin/Registrar. You will be notified once it's processed.</p>
           )}
@@ -113,7 +118,18 @@ export default function InstructorAccessibilityRequest() {
                   <span className="text-sm text-gray-700">{r}</span>
                 </label>
               ))}
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input type="radio" name="reason" value={OTHER} checked={form.reason === OTHER}
+                  onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
+                  className="mt-0.5 accent-orange-500" />
+                <span className="text-sm text-gray-700">Other — let me describe it</span>
+              </label>
             </div>
+            {form.reason === OTHER && (
+              <textarea value={form.customReason} onChange={e => setForm(f => ({ ...f, customReason: e.target.value }))}
+                rows={2} maxLength={255} placeholder="Why do you need priority for this room?"
+                className="w-full mt-2 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400 resize-none" />
+            )}
           </div>
 
           <div>
