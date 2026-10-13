@@ -118,6 +118,7 @@ export const placeholdersAPI = {
   replace: (id, data)                => api.post(`/placeholders/${id}/replace`, data),
   changes: ()                        => api.get('/placeholders/changes'),
   respond: (changeId, action)        => api.patch(`/placeholders/changes/${changeId}/respond`, { action }),
+  release: (entry_ids, reason)       => api.patch('/placeholders/release', { entry_ids, reason }),
 }
 
 export const notificationsAPI = {

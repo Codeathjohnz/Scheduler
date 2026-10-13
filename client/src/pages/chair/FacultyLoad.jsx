@@ -661,7 +661,8 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
           </div>
 
           {editEntry && !editEntry.assigned_instructor_id && !isCoordPool && (
-            <CrossCollegeRequestBox entryId={editEntry.id} year={year} semester={semester} onSent={onClose} />
+            <CrossCollegeRequestBox entryId={editEntry.id} year={year} semester={semester} onSent={onClose}
+              initialNote={editEntry.needs_instructor_reason || ''} />
           )}
 
           <div className="flex gap-3 pt-1">
@@ -681,11 +682,11 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
 /* ─── Request an instructor from another college — Chair A's end of the
    Chair A -> Dean A -> Dean B -> Chair B -> Instructor chain. Only shown on
    an already-saved, still-unassigned entry (the request needs an entry_id). */
-function CrossCollegeRequestBox({ entryId, year, semester, onSent }) {
-  const [open, setOpen]               = useState(false)
+function CrossCollegeRequestBox({ entryId, year, semester, onSent, initialNote = '' }) {
+  const [open, setOpen]               = useState(!!initialNote)
   const [departments, setDepartments] = useState([])
   const [target, setTarget]           = useState('')
-  const [note, setNote]               = useState('')
+  const [note, setNote]               = useState(initialNote)
   const [sending, setSending]         = useState(false)
 
   const loadDepartments = async () => {
@@ -696,6 +697,7 @@ function CrossCollegeRequestBox({ entryId, year, semester, onSent }) {
   }
 
   const handleOpen = () => { setOpen(true); loadDepartments() }
+  useEffect(() => { if (initialNote) loadDepartments() }, [])   // auto-opened because a release reason carried over — need the college list right away
 
   const handleSend = async () => {
     if (!target) { toast.error('Pick a college to ask.'); return }
@@ -1935,13 +1937,21 @@ export default function FacultyLoad() {
                                     </span>
                                   )}
                                   {!e.assigned_instructor_id && e.request_status && e.request_status !== 'declined' && (
-                                    <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800" title="Waiting on the other department — see Teaching Requests">
-                                      {e.request_status === 'pending_instructor' ? `Asked ${e.request_instructor}` : `${e.request_instructor} accepted — awaiting their dept`}
+                                    <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800" title="Waiting on the cross-department request — see Teaching Requests">
+                                      {e.request_status === 'pending_dean_a' ? 'Pending with your Dean'
+                                        : e.request_status === 'pending_dean_b' ? `Pending with ${e.request_instructor}'s Dean`
+                                        : e.request_status === 'pending_chair_b' ? `Pending with ${e.request_instructor}'s Chair`
+                                        : `Asked ${e.request_instructor}`}
                                     </span>
                                   )}
                                   {!e.assigned_instructor_id && e.request_status === 'declined' && (
                                     <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800" title={e.request_decline_reason || ''}>
-                                      {e.request_declined_stage === 'home' ? `${e.request_instructor}'s dept declined` : `${e.request_instructor} declined`}{e.request_decline_reason ? `: ${e.request_decline_reason}` : ''}
+                                      {e.request_declined_stage === 'dean_a' ? 'Your Dean declined' : `${e.request_instructor}'s Dean declined`}{e.request_decline_reason ? `: ${e.request_decline_reason}` : ''}
+                                    </span>
+                                  )}
+                                  {!e.assigned_instructor_id && !e.request_status && e.needs_instructor_reason && (
+                                    <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900" title={e.needs_instructor_reason}>
+                                      ⚠ Needs instructor from another college: {e.needs_instructor_reason}
                                     </span>
                                   )}
                                 </td>

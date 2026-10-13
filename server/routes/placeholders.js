@@ -94,11 +94,15 @@ router.post('/fill', authenticate, authorize('chair'), async (req, res) => {
     const [allEntries] = await pool.query(
       `SELECT e.* FROM faculty_load_entries e
        WHERE e.chair_id = ? AND e.academic_year = ? AND e.semester = ? AND e.assigned_instructor_id IS NULL
+         AND e.needs_instructor_reason IS NULL
          AND NOT EXISTS (SELECT 1 FROM cross_dept_chain c WHERE c.entry_id = e.id AND c.stage NOT IN ('finalized', 'declined', 'cancelled'))
        ORDER BY e.year_level, e.subject_id, e.id`,
       [req.user.id, academic_year, semester]
     )
-    const entries = allEntries.filter(e => !coordinatorPool(e.course_code))
+    // NSTP should never exist as a row at all (see the Auto-Generate filter),
+    // but a legacy one from before that fix is excluded here too rather than
+    // ever being parked on a placeholder.
+    const entries = allEntries.filter(e => !coordinatorPool(e.course_code) && !isNstp(e.course_code))
     if (!entries.length) {
       return res.json({
         assigned: 0, created: 0,
@@ -145,6 +149,41 @@ router.post('/fill', authenticate, authorize('chair'), async (req, res) => {
       assigned: entries.length, created,
       message: `${entries.length} unassigned subject${entries.length > 1 ? 's' : ''} placed on ${assignedBy.size} placeholder instructor${assignedBy.size > 1 ? 's' : ''}${created ? ` (${created} new)` : ''}.`,
     })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+// ── PATCH /api/placeholders/release ────────────────────────────────────────────
+// Pull one or more sections off a placeholder because nobody in this
+// department can actually teach them — e.g. the chair looks at what
+// "Instructor A" is holding and realizes one of its subjects really needs a
+// specialist from another college. Flags them with the reason instead of
+// just leaving them silently unassigned, so it's obvious on the Loading
+// Sheet that this one needs a cross-department request next, and "Fill
+// Placeholders" won't just scoop it right back onto a placeholder.
+router.patch('/release', authenticate, authorize('chair'), async (req, res) => {
+  const { entry_ids, reason } = req.body
+  if (!Array.isArray(entry_ids) || !entry_ids.length) {
+    return res.status(400).json({ message: 'entry_ids is required.' })
+  }
+  if (!reason || !String(reason).trim()) {
+    return res.status(400).json({ message: 'Please give a reason.' })
+  }
+  try {
+    const [rows] = await pool.query(
+      `SELECT e.id FROM faculty_load_entries e
+       JOIN users u ON u.id = e.assigned_instructor_id
+       WHERE e.id IN (?) AND e.chair_id = ? AND u.is_placeholder = 1`,
+      [entry_ids, req.user.id]
+    )
+    if (!rows.length) return res.status(404).json({ message: 'No matching placeholder-held subjects found.' })
+    const ids = rows.map(r => r.id)
+    await pool.query(
+      'UPDATE faculty_load_entries SET assigned_instructor_id = NULL, needs_instructor_reason = ? WHERE id IN (?)',
+      [String(reason).trim().slice(0, 255), ids]
+    )
+    res.json({ message: `${ids.length} section${ids.length > 1 ? 's' : ''} released — flagged as needing an instructor from another college. Use "Request instructor from another college" on it in Faculty Load.`, released: ids.length })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }

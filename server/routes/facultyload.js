@@ -194,10 +194,10 @@ router.get('/', authenticate, authorize('chair', 'admin'), async (req, res) => {
         (fle.assigned_instructor_id IS NOT NULL AND u.department = c.department
           AND u.programs IS NOT NULL AND u.programs <> ''
           AND p.program IS NOT NULL AND NOT FIND_IN_SET(p.program, u.programs)) AS program_mismatch,
-        (SELECT r.status FROM cross_dept_requests r WHERE r.entry_id = fle.id AND r.status IN ('pending_instructor','pending_home','declined') ORDER BY r.id DESC LIMIT 1) AS request_status,
-        (SELECT ri.name FROM cross_dept_requests r JOIN users ri ON ri.id = r.instructor_id WHERE r.entry_id = fle.id AND r.status IN ('pending_instructor','pending_home','declined') ORDER BY r.id DESC LIMIT 1) AS request_instructor,
-        (SELECT r.declined_stage FROM cross_dept_requests r WHERE r.entry_id = fle.id AND r.status IN ('pending_instructor','pending_home','declined') ORDER BY r.id DESC LIMIT 1) AS request_declined_stage,
-        (SELECT r.decline_reason FROM cross_dept_requests r WHERE r.entry_id = fle.id AND r.status IN ('pending_instructor','pending_home','declined') ORDER BY r.id DESC LIMIT 1) AS request_decline_reason
+        (SELECT c.stage FROM cross_dept_chain c WHERE c.entry_id = fle.id AND c.stage NOT IN ('finalized','cancelled') ORDER BY c.id DESC LIMIT 1) AS request_status,
+        (SELECT COALESCE(ci.name, c.target_department) FROM cross_dept_chain c LEFT JOIN users ci ON ci.id = c.instructor_id WHERE c.entry_id = fle.id AND c.stage NOT IN ('finalized','cancelled') ORDER BY c.id DESC LIMIT 1) AS request_instructor,
+        (SELECT c.decline_stage FROM cross_dept_chain c WHERE c.entry_id = fle.id AND c.stage = 'declined' ORDER BY c.id DESC LIMIT 1) AS request_declined_stage,
+        (SELECT c.decline_reason FROM cross_dept_chain c WHERE c.entry_id = fle.id AND c.stage = 'declined' ORDER BY c.id DESC LIMIT 1) AS request_decline_reason
       FROM faculty_load_entries fle
       LEFT JOIN users u ON fle.assigned_instructor_id = u.id
       LEFT JOIN users c ON fle.chair_id = c.id
@@ -427,18 +427,21 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
       }
     }
     const finalAssigned = assigned_instructor_id || null
+    // A real instructor landing here resolves whatever the "needs another
+    // department" flag was about — clear it. Still unassigned leaves it as is.
+    const clearFlagSql = finalAssigned ? ', needs_instructor_reason = NULL' : ''
     if (subject) {
       await pool.query(`
         UPDATE faculty_load_entries SET
           course_code=?, descriptive_title=?, program_yr_sec=?, year_level=?, units=?, lec_hours=?, lab_hours=?,
-          assigned_instructor_id=?, room=?, subject_id=?
+          assigned_instructor_id=?, room=?, subject_id=?${clearFlagSql}
         WHERE id=?
       `, [subject.course_code, subject.descriptive_title, program_yr_sec, year_level || null,
           subject.units, subject.lec_hours, subject.lab_hours, finalAssigned, room || null, subject_id, req.params.id])
     } else {
       await pool.query(`
         UPDATE faculty_load_entries SET
-          program_yr_sec=?, year_level=?, assigned_instructor_id=?, room=?
+          program_yr_sec=?, year_level=?, assigned_instructor_id=?, room=?${clearFlagSql}
         WHERE id=?
       `, [program_yr_sec, year_level || null, finalAssigned, room || null, req.params.id])
     }
@@ -578,8 +581,12 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
       subjects = rows.filter(r => r.prospectus_id === latestId)
     }
 
-    // Only generate entries for the selected term's semester
-    subjects = subjects.filter(s => Number(s.semester) === Number(semester))
+    // Only generate entries for the selected term's semester. NSTP is never
+    // part of this system's load or schedule (it's dropped on prospectus
+    // import now, but a prospectus uploaded before that fix shipped can
+    // still have legacy NSTP rows sitting in prospectus_subjects — filtered
+    // out here too so it can never resurface through Auto-Generate).
+    subjects = subjects.filter(s => Number(s.semester) === Number(semester) && !isNstp(s.course_code))
 
     if (!subjects.length) {
       return res.status(400).json({ message: `No ${['','1st','2nd','Summer'][semester] || ''} Semester subjects found in the selected prospectus.` })

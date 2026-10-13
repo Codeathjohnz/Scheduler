@@ -502,6 +502,40 @@ const steps = [
       return true
     },
   },
+  // NSTP is supposed to never appear anywhere — dropped at prospectus import
+  // time since an earlier update, but a prospectus uploaded before that fix
+  // shipped could still have NSTP rows already sitting in prospectus_subjects,
+  // which Auto-Generate (before today) would happily turn into real
+  // faculty_load_entries rows, visible on the Loading Sheet and parkable on a
+  // placeholder. Purges both: the already-created entries, and the source
+  // rows in prospectus_subjects so Auto-Generate can never recreate them.
+  {
+    name: 'purge any legacy NSTP rows from faculty_load_entries and prospectus_subjects',
+    async run(pool) {
+      const [entryRows] = await pool.query('SELECT id, course_code FROM faculty_load_entries')
+      const entryIds = entryRows.filter(r => /^NSTP\b/i.test(r.course_code)).map(r => r.id)
+      const [subjRows] = await pool.query('SELECT id, course_code FROM prospectus_subjects')
+      const subjIds = subjRows.filter(r => /^NSTP\b/i.test(r.course_code)).map(r => r.id)
+      if (!entryIds.length && !subjIds.length) return false
+      if (entryIds.length) await pool.query('DELETE FROM faculty_load_entries WHERE id IN (?)', [entryIds])
+      if (subjIds.length) await pool.query('DELETE FROM prospectus_subjects WHERE id IN (?)', [subjIds])
+      console.log(`[migrate] purged ${entryIds.length} legacy NSTP faculty_load_entries and ${subjIds.length} legacy NSTP prospectus_subjects rows`)
+      return true
+    },
+  },
+  // A chair can pull a section off a placeholder with a reason ("nobody in
+  // this department can teach it") instead of leaving it silently unassigned
+  // — see routes/placeholders.js PATCH /release. A non-null value here is
+  // the flag itself; cleared the moment a real instructor is assigned,
+  // whichever path that happens through.
+  {
+    name: 'faculty_load_entries.needs_instructor_reason',
+    async run(pool) {
+      if (await columnInfo(pool, 'faculty_load_entries', 'needs_instructor_reason')) return false
+      await pool.query('ALTER TABLE faculty_load_entries ADD COLUMN needs_instructor_reason VARCHAR(255) NULL DEFAULT NULL')
+      return true
+    },
+  },
 ]
 
 export async function runMigrations(pool) {

@@ -277,7 +277,7 @@ router.patch('/:id/respond', authenticate, authorize('instructor', 'chair', 'dea
       return res.status(400).json({ message: `Accepting would put you at ${(load + add).toFixed(2)} units, over the ${MAX_UNITS}-unit cap. Decline instead.` })
     }
 
-    await pool.query('UPDATE faculty_load_entries SET assigned_instructor_id = ? WHERE id = ?', [req.user.id, r.entry_id])
+    await pool.query('UPDATE faculty_load_entries SET assigned_instructor_id = ?, needs_instructor_reason = NULL WHERE id = ?', [req.user.id, r.entry_id])
     await pool.query("UPDATE cross_dept_chain SET stage = 'finalized', instructor_at = NOW() WHERE id = ?", [r.id])
     await log(r.id, 'instructor_accepted', req.user.id, null)
     await syncConfirmation(r.requested_by, r.academic_year, r.semester, req.user.id)
