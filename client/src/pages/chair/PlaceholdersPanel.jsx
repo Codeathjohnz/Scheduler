@@ -161,78 +161,45 @@ export function AssignModal({ ph, year, semester, onClose, onDone }) {
 }
 
 /* ── the panel ───────────────────────────────────────────────────────────── */
-export default function PlaceholdersPanel({ year, semester, refreshKey, onChanged }) {
-  const [list, setList]       = useState([])
+// Just the swap history now — each placeholder's own card on the Loading
+// Sheet already shows what it holds and its own "Assign a real instructor"
+// button, so there's no reason to list that twice here.
+export default function PlaceholdersPanel({ year, semester, refreshKey }) {
   const [changes, setChanges] = useState([])
   const [loading, setLoading] = useState(true)
-  const [assigning, setAssigning] = useState(null)
 
   const load = useCallback(async () => {
     try {
-      const [p, c] = await Promise.all([placeholdersAPI.list(year, semester), placeholdersAPI.changes()])
-      setList(p.data); setChanges(c.data)
+      const c = await placeholdersAPI.changes()
+      setChanges(c.data)
     } catch { /* leave as is */ }
     finally { setLoading(false) }
-  }, [year, semester])
+  }, [])
 
   useEffect(() => { load() }, [load, refreshKey])
 
-  if (loading || (list.length === 0 && changes.length === 0)) return null
+  if (loading || changes.length === 0) return null
 
   return (
     <div className="mb-6 bg-white rounded-2xl shadow-sm border-2 border-indigo-200 overflow-hidden">
-      <div className="px-5 py-3 bg-indigo-50 border-b border-indigo-100">
-        <h3 className="font-bold text-indigo-900 text-sm">Placeholder instructors</h3>
-        <p className="text-xs text-indigo-700 mt-0.5">Stand-ins that hold subjects until a real instructor is found, so the load can still be approved and scheduled. When someone suitable is available, assign them to take over.</p>
-      </div>
-
-      <div className="divide-y divide-gray-100">
-        {list.map(ph => (
-          <div key={ph.id} className="px-5 py-4 flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="font-bold text-gray-800 text-sm">{ph.name} <span className="ml-2 text-xs font-semibold text-gray-400">{ph.units.toFixed(2)} units</span></p>
-              <p className="text-[11px] text-gray-400 mt-0.5 uppercase tracking-wide">Subjects it holds</p>
-              <ul className="mt-1 text-sm text-gray-700 space-y-0.5">
-                {ph.subjects.map(s => (
-                  <li key={s.course_code}><span className="font-mono font-semibold text-green-800 text-xs">{s.course_code}</span> {s.title}
-                    <span className="text-gray-400 text-xs"> · {s.sections.map(x => x.section.split(' ').pop()).join(', ')}</span></li>
-                ))}
-              </ul>
-            </div>
-            <button onClick={() => setAssigning(ph)} disabled={ph.suggestions.length === 0}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-semibold px-4 py-2 rounded-xl text-sm shrink-0">
-              <UserCheck className="w-4 h-4" /> Assign a real instructor
-            </button>
-          </div>
-        ))}
-      </div>
-
-      {changes.length > 0 && (
-        <div className="px-5 py-3 bg-gray-50 border-t border-gray-100">
-          <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-2">Recent assignments</p>
-          <div className="space-y-1.5">
-            {changes.slice(0, 5).map(c => {
-              const st = STATUS[c.status]
-              return (
-                <div key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-700">
-                  <span><strong>{c.placeholder_name}</strong> <ArrowRight className="inline w-3 h-3 text-gray-400" /> <strong>{c.instructor_name}</strong>
-                    <span className="text-gray-400"> · {new Date(c.created_at).toLocaleDateString()}</span>
-                    {c.is_exception ? <span className="ml-1 text-amber-700 font-semibold" title={c.reason || ''}>· exception</span> : null}
-                    {c.unresolved > 0 && <span className="ml-1 text-red-700 font-semibold">· {c.unresolved} need a time slot</span>}
-                  </span>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${st.cls}`}>{c.status === 'pending' && <Clock className="inline w-3 h-3 mr-0.5 -mt-0.5" />}{st.label}</span>
-                </div>
-              )
-            })}
-          </div>
+      <div className="px-5 py-3 bg-gray-50">
+        <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-2">Recent assignments</p>
+        <div className="space-y-1.5">
+          {changes.slice(0, 5).map(c => {
+            const st = STATUS[c.status]
+            return (
+              <div key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-700">
+                <span><strong>{c.placeholder_name}</strong> <ArrowRight className="inline w-3 h-3 text-gray-400" /> <strong>{c.instructor_name}</strong>
+                  <span className="text-gray-400"> · {new Date(c.created_at).toLocaleDateString()}</span>
+                  {c.is_exception ? <span className="ml-1 text-amber-700 font-semibold" title={c.reason || ''}>· exception</span> : null}
+                  {c.unresolved > 0 && <span className="ml-1 text-red-700 font-semibold">· {c.unresolved} need a time slot</span>}
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${st.cls}`}>{c.status === 'pending' && <Clock className="inline w-3 h-3 mr-0.5 -mt-0.5" />}{st.label}</span>
+              </div>
+            )
+          })}
         </div>
-      )}
-
-      {assigning && (
-        <AssignModal ph={assigning} year={year} semester={semester}
-          onClose={() => setAssigning(null)}
-          onDone={() => { setAssigning(null); load(); onChanged?.() }} />
-      )}
+      </div>
     </div>
   )
 }

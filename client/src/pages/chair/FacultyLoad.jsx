@@ -1715,8 +1715,7 @@ export default function FacultyLoad() {
             </div>
           )}
 
-          <PlaceholdersPanel year={loadYear} semester={loadSem} refreshKey={phRefresh}
-            onChanged={() => { fetchEntries(); setPhRefresh(k => k + 1) }} />
+          <PlaceholdersPanel year={loadYear} semester={loadSem} refreshKey={phRefresh} />
 
           {/* Overload warning */}
           {overloadedInstructors.length > 0 && (
