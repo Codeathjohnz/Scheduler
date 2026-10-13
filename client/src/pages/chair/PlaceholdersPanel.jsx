@@ -166,9 +166,6 @@ export default function PlaceholdersPanel({ year, semester, refreshKey, onChange
   const [changes, setChanges] = useState([])
   const [loading, setLoading] = useState(true)
   const [assigning, setAssigning] = useState(null)
-  const [releasingKey, setReleasingKey] = useState(null)   // `${ph.id}-${course_code}` currently showing its reason box
-  const [releaseReason, setReleaseReason] = useState('')
-  const [releasing, setReleasing] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -179,24 +176,6 @@ export default function PlaceholdersPanel({ year, semester, refreshKey, onChange
   }, [year, semester])
 
   useEffect(() => { load() }, [load, refreshKey])
-
-  // Pull every section of one subject off its placeholder — it needs an
-  // instructor from another college instead, so it goes back to genuinely
-  // unassigned (flagged with the reason) rather than staying parked here.
-  const submitRelease = async (entryIds) => {
-    if (!releaseReason.trim()) { toast.error('Please give a reason.'); return }
-    setReleasing(true)
-    try {
-      const r = await placeholdersAPI.release(entryIds, releaseReason.trim())
-      toast.success(r.data.message, { duration: 6000 })
-      setReleasingKey(null); setReleaseReason('')
-      await load(); onChanged?.()
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Could not release this subject.', { duration: 6000 })
-    } finally {
-      setReleasing(false)
-    }
-  }
 
   if (loading || (list.length === 0 && changes.length === 0)) return null
 
@@ -213,39 +192,11 @@ export default function PlaceholdersPanel({ year, semester, refreshKey, onChange
             <div className="min-w-0 flex-1">
               <p className="font-bold text-gray-800 text-sm">{ph.name} <span className="ml-2 text-xs font-semibold text-gray-400">{ph.units.toFixed(2)} units</span></p>
               <p className="text-[11px] text-gray-400 mt-0.5 uppercase tracking-wide">Subjects it holds</p>
-              <ul className="mt-1 text-sm text-gray-700 space-y-1">
-                {ph.subjects.map(s => {
-                  const key = `${ph.id}-${s.course_code}`
-                  const entryIds = s.sections.map(x => x.entry_id)
-                  return (
-                    <li key={s.course_code}>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span><span className="font-mono font-semibold text-green-800 text-xs">{s.course_code}</span> {s.title}
-                          <span className="text-gray-400 text-xs"> · {s.sections.map(x => x.section.split(' ').pop()).join(', ')}</span></span>
-                        {releasingKey !== key && (
-                          <button onClick={() => { setReleasingKey(key); setReleaseReason('') }}
-                            className="text-[10px] font-semibold text-amber-700 hover:text-amber-900 underline">
-                            Needs instructor from another college
-                          </button>
-                        )}
-                      </div>
-                      {releasingKey === key && (
-                        <div className="mt-1.5 flex flex-wrap gap-2 items-center bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
-                          <input autoFocus value={releaseReason} onChange={e => setReleaseReason(e.target.value)} maxLength={255}
-                            placeholder="Reason — e.g. no IT instructor can teach this" onKeyDown={e => { if (e.key === 'Enter' && releaseReason.trim()) submitRelease(entryIds) }}
-                            className="flex-1 min-w-[200px] border-2 border-amber-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-amber-400 bg-white" />
-                          <button disabled={releasing || !releaseReason.trim()} onClick={() => submitRelease(entryIds)}
-                            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg">
-                            {releasing ? 'Releasing…' : 'Release'}
-                          </button>
-                          <button onClick={() => { setReleasingKey(null); setReleaseReason('') }} className="px-2 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700">
-                            Cancel
-                          </button>
-                        </div>
-                      )}
-                    </li>
-                  )
-                })}
+              <ul className="mt-1 text-sm text-gray-700 space-y-0.5">
+                {ph.subjects.map(s => (
+                  <li key={s.course_code}><span className="font-mono font-semibold text-green-800 text-xs">{s.course_code}</span> {s.title}
+                    <span className="text-gray-400 text-xs"> · {s.sections.map(x => x.section.split(' ').pop()).join(', ')}</span></li>
+                ))}
               </ul>
             </div>
             <button onClick={() => setAssigning(ph)} disabled={ph.suggestions.length === 0}
