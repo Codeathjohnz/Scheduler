@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import toast from 'react-hot-toast'
 import PageHeader from '../../components/ui/PageHeader.jsx'
-import { crossDeptChainAPI, crossDeptAPI, facultyLoadAPI } from '../../services/api.js'
+import { crossDeptChainAPI, crossDeptAPI, facultyLoadAPI, geCoordinatorAPI } from '../../services/api.js'
 import { useAuth } from '../../context/AuthContext.jsx'
 import { creditOf } from '../../utils/unitCredit.js'
 import { Loader2, Check, X, ArrowRight, Undo2, Inbox, Send } from 'lucide-react'
@@ -246,19 +246,21 @@ export default function TeachingRequests() {
   const [deanInbox, setDeanInbox] = useState({ asDeanA: [], asDeanB: [], recent: [] })
   const [toAssign, setToAssign]   = useState([])
   const [toAnswer, setToAnswer]   = useState([])
+  const [geMine, setGeMine]   = useState([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId]   = useState(null)
   const [showNewRequest, setShowNewRequest] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const [m, d, a, ans] = await Promise.all([
+      const [m, d, a, ans, ge] = await Promise.all([
         isChair ? crossDeptChainAPI.mine() : Promise.resolve({ data: [] }),
         isDean ? crossDeptChainAPI.deanInbox() : Promise.resolve({ data: { asDeanA: [], asDeanB: [], recent: [] } }),
         isChair ? crossDeptChainAPI.toAssign() : Promise.resolve({ data: [] }),
         crossDeptChainAPI.toAnswer(),
+        isChair ? geCoordinatorAPI.mine() : Promise.resolve({ data: [] }),
       ])
-      setMine(m.data); setDeanInbox(d.data); setToAssign(a.data); setToAnswer(ans.data)
+      setMine(m.data); setDeanInbox(d.data); setToAssign(a.data); setToAnswer(ans.data); setGeMine(ge.data)
     } catch {
       toast.error('Failed to load requests.')
     } finally {
@@ -433,6 +435,27 @@ export default function TeachingRequests() {
               ))}
             </div>
           )}
+        </section>
+      )}
+
+      {/* Chair: GE/PATHFIT subjects waiting on the GE Coordinator — nothing
+          to do here but see it's noticed; no request was ever sent, it
+          showed up the moment the subject was saved unassigned. */}
+      {isChair && geMine.length > 0 && (
+        <section>
+          <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-1">Waiting on the GE Coordinator ({geMine.length})</h2>
+          <p className="text-xs text-gray-400 mb-3">GE and PATHFIT subjects are assigned centrally — no request to send, this is just so it's not invisible while you wait.</p>
+          <div className="space-y-2">
+            {geMine.map(r => (
+              <div key={r.id} className="bg-white rounded-xl border border-gray-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-800"><span className="font-mono font-semibold text-green-800">{r.course_code}</span> {r.descriptive_title} <span className="text-gray-500">{r.program_yr_sec}</span></p>
+                  <p className="text-xs text-gray-400 mt-0.5">{SEM[r.semester]} A.Y. {r.academic_year}</p>
+                </div>
+                <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${r.pool === 'PATHFIT' ? 'bg-sky-100 text-sky-800' : 'bg-lime-100 text-lime-800'}`}>{r.pool}</span>
+              </div>
+            ))}
+          </div>
         </section>
       )}
 

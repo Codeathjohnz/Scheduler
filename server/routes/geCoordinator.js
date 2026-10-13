@@ -35,6 +35,22 @@ router.get('/queue', authenticate, authorize('ge_coordinator', 'admin'), async (
   }
 })
 
+// GET /api/ge-coordinator/mine — a chair's own GE/PATHFIT subjects still
+// waiting on the Coordinator, across every term — there's nothing for the
+// chair to do here but see it's noticed; no request to send, it already
+// showed up the moment they saved the subject unassigned.
+router.get('/mine', authenticate, authorize('chair'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT * FROM faculty_load_entries WHERE chair_id = ? AND assigned_instructor_id IS NULL ORDER BY academic_year DESC, semester, id`,
+      [req.user.id]
+    )
+    res.json(rows.filter(r => coordinatorPool(r.course_code)).map(r => ({ ...r, pool: coordinatorPool(r.course_code) })))
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
 // GET /api/ge-coordinator/assigned?year=&semester= — recent assignments, for a sanity check across colleges
 router.get('/assigned', authenticate, authorize('ge_coordinator', 'admin'), async (req, res) => {
   const { year = '2026-2027', semester = 1 } = req.query
