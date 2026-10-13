@@ -11,8 +11,8 @@ const STATUS = {
   declined:  { label: 'Declined — back on the placeholder', cls: 'bg-red-100 text-red-800' },
 }
 
-/* ── swap dialog ─────────────────────────────────────────────────────────── */
-function ReplaceModal({ ph, year, semester, onClose, onDone }) {
+/* ── assign dialog ───────────────────────────────────────────────────────── */
+function AssignModal({ ph, year, semester, onClose, onDone }) {
   const [pickedId, setPickedId] = useState(ph.suggestions[0]?.id ?? null)
   const [skipped, setSkipped]   = useState(new Set())      // entry ids the chair unticked
   const [reason, setReason]     = useState('')
@@ -35,7 +35,7 @@ function ReplaceModal({ ph, year, semester, onClose, onDone }) {
       })
       setResult(r.data)
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Could not complete the swap.', { duration: 7000 })
+      toast.error(err.response?.data?.message || 'Could not complete the assignment.', { duration: 7000 })
     } finally {
       setSaving(false)
     }
@@ -45,7 +45,7 @@ function ReplaceModal({ ph, year, semester, onClose, onDone }) {
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
-          <div className="px-6 py-4 bg-green-800 rounded-t-2xl flex items-center gap-2 text-white font-bold"><CheckCircle2 className="w-5 h-5" /> Swap complete</div>
+          <div className="px-6 py-4 bg-green-800 rounded-t-2xl flex items-center gap-2 text-white font-bold"><CheckCircle2 className="w-5 h-5" /> Assignment complete</div>
           <div className="px-6 py-5 space-y-3 text-sm">
             <p className="text-gray-700">{result.message}</p>
             <p className="text-gray-600">{result.instructor} is now at <strong>{result.projected_units.toFixed(2)} units</strong>.</p>
@@ -76,7 +76,7 @@ function ReplaceModal({ ph, year, semester, onClose, onDone }) {
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 bg-green-800 rounded-t-2xl sticky top-0">
           <div>
-            <p className="text-white font-bold">Replace {ph.name} with a real instructor</p>
+            <p className="text-white font-bold">Assign a real instructor to {ph.name}</p>
             <p className="text-green-300 text-xs mt-0.5">Approved subjects, sections and units stay exactly the same — only the instructor changes.</p>
           </div>
           <button onClick={onClose} className="text-green-300 hover:text-white"><X className="w-5 h-5" /></button>
@@ -143,14 +143,14 @@ function ReplaceModal({ ph, year, semester, onClose, onDone }) {
           )}
 
           <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-xs text-blue-900 leading-relaxed">
-            No re-approval by the whole chain. {cand?.name || 'The instructor'} confirms their own load with one click; the Dean and the Registrar are notified and the swap is logged.
+            No re-approval by the whole chain. {cand?.name || 'The instructor'} confirms their own load with one click; the Dean and the Registrar are notified and the assignment is logged.
             If a subject would clash with a class they already teach, only that subject is moved to a free slot.
           </div>
 
           <div className="flex gap-3">
             <button onClick={submit} disabled={saving || !cand || overCap || chosen.length === 0 || (exception && reason.trim().length < 5)}
               className="flex-1 flex items-center justify-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-sm">
-              {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Swapping…</> : <><UserCheck className="w-4 h-4" /> Replace {ph.name}</>}
+              {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Assigning…</> : <><UserCheck className="w-4 h-4" /> Assign to {ph.name}</>}
             </button>
             <button onClick={onClose} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-xl text-sm">Cancel</button>
           </div>
@@ -165,7 +165,7 @@ export default function PlaceholdersPanel({ year, semester, refreshKey, onChange
   const [list, setList]       = useState([])
   const [changes, setChanges] = useState([])
   const [loading, setLoading] = useState(true)
-  const [replacing, setReplacing] = useState(null)
+  const [assigning, setAssigning] = useState(null)
 
   const load = useCallback(async () => {
     try {
@@ -183,7 +183,7 @@ export default function PlaceholdersPanel({ year, semester, refreshKey, onChange
     <div className="mb-6 bg-white rounded-2xl shadow-sm border-2 border-indigo-200 overflow-hidden">
       <div className="px-5 py-3 bg-indigo-50 border-b border-indigo-100">
         <h3 className="font-bold text-indigo-900 text-sm">Placeholder instructors</h3>
-        <p className="text-xs text-indigo-700 mt-0.5">Stand-ins that hold subjects until a real instructor is found, so the load can still be approved and scheduled. When someone suitable arrives, swap them in.</p>
+        <p className="text-xs text-indigo-700 mt-0.5">Stand-ins that hold subjects until a real instructor is found, so the load can still be approved and scheduled. When someone suitable is available, assign them to take over.</p>
       </div>
 
       <div className="divide-y divide-gray-100">
@@ -199,9 +199,9 @@ export default function PlaceholdersPanel({ year, semester, refreshKey, onChange
                 ))}
               </ul>
             </div>
-            <button onClick={() => setReplacing(ph)} disabled={ph.suggestions.length === 0}
+            <button onClick={() => setAssigning(ph)} disabled={ph.suggestions.length === 0}
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-semibold px-4 py-2 rounded-xl text-sm shrink-0">
-              <UserCheck className="w-4 h-4" /> Replace with a real instructor
+              <UserCheck className="w-4 h-4" /> Assign a real instructor
             </button>
           </div>
         ))}
@@ -209,7 +209,7 @@ export default function PlaceholdersPanel({ year, semester, refreshKey, onChange
 
       {changes.length > 0 && (
         <div className="px-5 py-3 bg-gray-50 border-t border-gray-100">
-          <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-2">Recent swaps</p>
+          <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-2">Recent assignments</p>
           <div className="space-y-1.5">
             {changes.slice(0, 5).map(c => {
               const st = STATUS[c.status]
@@ -228,10 +228,10 @@ export default function PlaceholdersPanel({ year, semester, refreshKey, onChange
         </div>
       )}
 
-      {replacing && (
-        <ReplaceModal ph={replacing} year={year} semester={semester}
-          onClose={() => setReplacing(null)}
-          onDone={() => { setReplacing(null); load(); onChanged?.() }} />
+      {assigning && (
+        <AssignModal ph={assigning} year={year} semester={semester}
+          onClose={() => setAssigning(null)}
+          onDone={() => { setAssigning(null); load(); onChanged?.() }} />
       )}
     </div>
   )

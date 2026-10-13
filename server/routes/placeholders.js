@@ -15,7 +15,7 @@ import { notify, adminIds, deanIds } from '../utils/notify.js'
  * so the faculty load can still be completed, approved, and scheduled. A
  * placeholder is an ordinary (hidden, login-less) instructor row, so
  * everything that already works for people — the 21/27 unit cap, schedule
- * conflict checks, the load sheet — works for it too. The chair swaps in a
+ * conflict checks, the load sheet — works for it too. The chair assigns a
  * real instructor from their own department whenever one is available.
  *
  * GE and PATHFIT subjects never land on a chair's placeholder at all — they
@@ -23,15 +23,15 @@ import { notify, adminIds, deanIds } from '../utils/notify.js'
  * cross-college queue (routes/geCoordinator.js), which assigns them
  * centrally instead.
  *
- * WHO CONFIRMS A SWAP (deliberately not the whole approval chain again): the
- * subjects, sections, units and total load that were approved don't change —
- * only the name on them does. So the CHAIR makes the swap, the NEW INSTRUCTOR
- * confirms their own load with one click, and the DEAN and REGISTRAR are
- * notified (not asked) and can see it in the change log. Going over the
- * 21-unit standard load needs a written reason, flagged "exception" to the
- * Dean; the 27-unit cap can never be exceeded. Only same-department
- * instructors can be swapped in directly; anyone else goes through the
- * cross-department request flow.
+ * WHO CONFIRMS AN ASSIGNMENT (deliberately not the whole approval chain
+ * again): the subjects, sections, units and total load that were approved
+ * don't change — only the name on them does. So the CHAIR makes the
+ * assignment, the NEW INSTRUCTOR confirms their own load with one click, and
+ * the DEAN and REGISTRAR are notified (not asked) and can see it in the
+ * change log. Going over the 21-unit standard load needs a written reason,
+ * flagged "exception" to the Dean; the 27-unit cap can never be exceeded.
+ * Only same-department instructors can be assigned directly; anyone else
+ * goes through the cross-department request flow.
  */
 const router = Router()
 
@@ -264,7 +264,7 @@ router.post('/:id/replace', authenticate, authorize('chair'), async (req, res) =
       })
     }
 
-    // ── do the swap ──
+    // ── do the assignment ──
     const ids = eligible.map(e => e.id)
     await pool.query('UPDATE faculty_load_entries SET assigned_instructor_id = ? WHERE id IN (?)', [inst.id, ids])
     await syncConfirmation(req.user.id, academic_year, semester, inst.id)
@@ -285,7 +285,7 @@ router.post('/:id/replace', authenticate, authorize('chair'), async (req, res) =
     }
     await pool.query('UPDATE load_changes SET rescheduled = ?, unresolved = ? WHERE id = ?', [resched.rescheduled.length, resched.unresolved.length, changeId])
 
-    // ── tell everyone the swap touches ──
+    // ── tell everyone the assignment touches ──
     const subjectLines = [...new Set(eligible.map(e => e.course_code))]
     const summary = summarize(eligible)
     const term = `${SEM[semester] || semester} Sem A.Y. ${academic_year}`
@@ -298,12 +298,12 @@ router.post('/:id/replace', authenticate, authorize('chair'), async (req, res) =
       title: `You've been assigned ${subjectLines.length} subject${subjectLines.length > 1 ? 's' : ''} (${eligible.length} section${eligible.length > 1 ? 's' : ''}) by ${req.user.name || 'your chair'}`,
       body: `Taking over from ${ph.name} (${term}): ${summary}. Your load is now ${projected.toFixed(2)} units.${scheduleNote} Please confirm.`,
     })
-    const swapBody = `${chair.name} replaced ${ph.name} with ${inst.name} for ${summary} (${term}). Approved subjects, sections and units are unchanged — only the instructor. ${inst.name} is now at ${projected.toFixed(2)} units.${exception && reason ? ` Exception: ${reason}` : ''}${resched.rescheduled.length ? ` ${resched.rescheduled.length} rescheduled.` : ''}${resched.unresolved.length ? ` ${resched.unresolved.length} could not be re-slotted — needs manual scheduling.` : ''}`
-    await notify(await deanIds(chair.department), { type: 'load_swap', refId: changeId, title: `${ph.name} replaced by ${inst.name}`, body: swapBody, flag: exception ? 'exception' : null })
+    const assignBody = `${chair.name} assigned ${inst.name} to take over ${ph.name}'s ${summary} (${term}). Approved subjects, sections and units are unchanged — only the instructor. ${inst.name} is now at ${projected.toFixed(2)} units.${exception && reason ? ` Exception: ${reason}` : ''}${resched.rescheduled.length ? ` ${resched.rescheduled.length} rescheduled.` : ''}${resched.unresolved.length ? ` ${resched.unresolved.length} could not be re-slotted — needs manual scheduling.` : ''}`
+    await notify(await deanIds(chair.department), { type: 'load_swap', refId: changeId, title: `${inst.name} assigned to take over ${ph.name}`, body: assignBody, flag: exception ? 'exception' : null })
     await notify(await adminIds(), {
       type: 'load_swap', refId: changeId, link: '/admin/schedule-generator',
-      title: `${ph.name} replaced by ${inst.name}${resched.rescheduled.length || resched.unresolved.length ? ' — schedule changed' : ''}`,
-      body: `${swapBody} Reprint the updated Faculty Loading Sheet${resched.rescheduled.length ? ' and republish the schedule' : ''}.`,
+      title: `${inst.name} assigned to take over ${ph.name}${resched.rescheduled.length || resched.unresolved.length ? ' — schedule changed' : ''}`,
+      body: `${assignBody} Reprint the updated Faculty Loading Sheet${resched.rescheduled.length ? ' and republish the schedule' : ''}.`,
       flag: resched.unresolved.length ? 'attention' : (exception ? 'exception' : null),
     })
     if (resched.unresolved.length) {
@@ -334,7 +334,7 @@ router.post('/:id/replace', authenticate, authorize('chair'), async (req, res) =
   }
 })
 
-// ── GET /api/placeholders/changes — the swap log ───────────────────────────────
+// ── GET /api/placeholders/changes — the assignment log ─────────────────────────
 router.get('/changes', authenticate, authorize('chair', 'dean', 'admin'), async (req, res) => {
   try {
     const where = req.user.role === 'chair' ? 'lc.chair_id = ?' : req.user.role === 'dean'
@@ -365,7 +365,7 @@ router.patch('/changes/:id/respond', authenticate, authorize('instructor', 'chai
 
     if (action === 'confirm') {
       await pool.query("UPDATE load_changes SET status = 'confirmed', confirmed_at = NOW() WHERE id = ?", [lc.id])
-      await notify([lc.chair_id], { type: 'load_confirmed', refId: lc.id, title: `${lc.instructor_name} confirmed the load from ${lc.placeholder_name}`, body: 'The swap is complete — nothing further is needed.' })
+      await notify([lc.chair_id], { type: 'load_confirmed', refId: lc.id, title: `${lc.instructor_name} confirmed the load from ${lc.placeholder_name}`, body: 'The assignment is complete — nothing further is needed.' })
       return res.json({ message: 'Confirmed. Thank you.' })
     }
     // Declined: hand the subjects back to the placeholder so nothing is left without an instructor.
@@ -374,7 +374,7 @@ router.patch('/changes/:id/respond', authenticate, authorize('instructor', 'chai
     await pool.query("UPDATE load_changes SET status = 'declined', confirmed_at = NOW() WHERE id = ?", [lc.id])
     const body = `The subjects are back on ${lc.placeholder_name}. Pick another instructor from Faculty Load.`
     await notify([lc.chair_id], { type: 'load_declined', refId: lc.id, flag: 'attention', title: `${lc.instructor_name} declined the load from ${lc.placeholder_name}`, body })
-    await notify(await adminIds(), { type: 'load_declined', refId: lc.id, title: `${lc.placeholder_name} swap declined by ${lc.instructor_name}`, body: `${body} Republish the schedule if it was already updated.` })
+    await notify(await adminIds(), { type: 'load_declined', refId: lc.id, title: `${lc.instructor_name} declined the assignment from ${lc.placeholder_name}`, body: `${body} Republish the schedule if it was already updated.` })
     res.json({ message: 'Declined. The subjects went back to the placeholder.' })
   } catch (err) {
     res.status(500).json({ message: err.message })

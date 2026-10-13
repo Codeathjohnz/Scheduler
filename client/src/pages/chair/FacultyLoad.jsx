@@ -1234,7 +1234,7 @@ export default function FacultyLoad() {
   }
 
   // Park every still-unassigned subject on "Instructor A/B/C…" so the load can be
-  // completed and approved; a real instructor is swapped in later (Placeholders panel).
+  // completed and approved; a real instructor is assigned in later (Placeholders panel).
   const handleFillPlaceholders = async () => {
     setFillingPh(true)
     try {
@@ -1290,8 +1290,8 @@ export default function FacultyLoad() {
   }
   const groupedInstructors = Object.values(instructorGroups)
 
-  // Anyone over the hard unit-credit cap — a manual assignment or placeholder
-  // swap could still push someone past it, so this has to be checked before
+  // Anyone over the hard unit-credit cap — a manual or placeholder
+  // assignment could still push someone past it, so this has to be checked before
   // submitting (mirrors the server-side guard).
   const groupCredit = (grp) => {
     // NSTP does not count toward the unit-credit cap.
@@ -1586,7 +1586,7 @@ export default function FacultyLoad() {
               <span className="text-base">⚠</span>
               <span className="flex-1"><strong>{entries.filter(e=>!e.assigned_instructor_id).length} subject{entries.filter(e=>!e.assigned_instructor_id).length>1?'s':''}</strong> still have no instructor assigned — click the edit button on those rows to assign manually, or park them on placeholders.</span>
               <button onClick={handleFillPlaceholders} disabled={fillingPh}
-                title="Gives each unassigned subject a stand-in (Instructor A, B, C…) so the load can be approved. Swap in a real instructor later."
+                title="Gives each unassigned subject a stand-in (Instructor A, B, C…) so the load can be approved. Assign a real instructor later."
                 className="shrink-0 flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold px-3 py-1.5 rounded-lg text-xs">
                 {fillingPh ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Users className="w-3.5 h-3.5" />} Assign placeholders
               </button>
@@ -1719,7 +1719,7 @@ export default function FacultyLoad() {
               <GraduationCap className="w-12 h-12 mb-3 opacity-30"/>
               <p className="font-semibold text-gray-500 text-base">Ready to generate the Faculty Loading Sheet</p>
               <p className="text-sm mt-1 text-gray-400 max-w-sm text-center">
-                Click <strong className="text-green-700">Add Missing Subjects</strong> above to build the roster from your prospectus — every subject comes out unassigned; use Placeholders to park them on a mock instructor, then swap in a real one.
+                Click <strong className="text-green-700">Add Missing Subjects</strong> above to build the roster from your prospectus — every subject comes out unassigned; use Placeholders to park them on a mock instructor, then assign a real one.
               </p>
             </div>
           ) : (
