@@ -131,7 +131,12 @@ function NewRequestModal({ onClose, onSent }) {
     setLoadingEntries(true)
     Promise.all([facultyLoadAPI.getAll(year, semester), crossDeptAPI.accessDepartments(year, semester)])
       .then(([e, d]) => {
-        setEntries(e.data.entries.filter(x => !x.assigned_instructor_id && !CROSS_DEPT_POOL.test(x.course_code)))
+        // Genuinely unassigned, or still sitting on a placeholder ("Instructor
+        // A") — either way nobody real is actually teaching it yet. GE/PATHFIT
+        // never come through here; those go through the GE Coordinator.
+        setEntries(e.data.entries.filter(x =>
+          (!x.assigned_instructor_id || x.instructor_is_placeholder) && !CROSS_DEPT_POOL.test(x.course_code)
+        ))
         setDepartments(d.data.map(dep => dep.department))
       })
       .catch(() => { setEntries([]); setDepartments([]) })
@@ -185,15 +190,17 @@ function NewRequestModal({ onClose, onSent }) {
             </label>
             <select value={entryId} onChange={e => setEntryId(e.target.value)}
               className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-green-500">
-              <option value="">— Pick an unassigned subject —</option>
+              <option value="">— Pick a subject —</option>
               {entries.map(e => (
                 <option key={e.id} value={e.id}>
-                  {e.course_code} — {e.descriptive_title} ({e.program_yr_sec}){e.needs_instructor_reason ? ' ⚠ flagged' : ''}
+                  {e.course_code} — {e.descriptive_title} ({e.program_yr_sec})
+                  {e.instructor_is_placeholder ? ` — on ${e.instructor_name}` : ''}
+                  {e.needs_instructor_reason ? ' ⚠ flagged' : ''}
                 </option>
               ))}
             </select>
             {!loadingEntries && entries.length === 0 && (
-              <p className="text-xs text-gray-400 mt-1">No unassigned subjects for this term — GE/PATHFIT subjects go through the GE Coordinator instead.</p>
+              <p className="text-xs text-gray-400 mt-1">Nothing eligible for this term — every subject already has a real instructor, or GE/PATHFIT (which go through the GE Coordinator instead).</p>
             )}
           </div>
 

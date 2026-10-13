@@ -660,7 +660,7 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
               className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
           </div>
 
-          {editEntry && !editEntry.assigned_instructor_id && !isCoordPool && (
+          {editEntry && (!editEntry.assigned_instructor_id || editEntry.instructor_is_placeholder) && !isCoordPool && (
             <CrossCollegeRequestBox entryId={editEntry.id} year={year} semester={semester} onSent={onClose}
               initialNote={editEntry.needs_instructor_reason || ''} />
           )}

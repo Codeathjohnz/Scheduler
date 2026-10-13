@@ -59,9 +59,20 @@ router.post('/', authenticate, authorize('chair'), async (req, res) => {
   const { entry_id, target_department, note } = req.body
   if (!entry_id || !target_department) return res.status(400).json({ message: 'Choose a subject and a college to ask.' })
   try {
-    const [[entry]] = await pool.query('SELECT * FROM faculty_load_entries WHERE id = ? AND chair_id = ?', [entry_id, req.user.id])
+    const [[entry]] = await pool.query(
+      `SELECT fle.*, u.is_placeholder AS instructor_is_placeholder
+       FROM faculty_load_entries fle LEFT JOIN users u ON u.id = fle.assigned_instructor_id
+       WHERE fle.id = ? AND fle.chair_id = ?`,
+      [entry_id, req.user.id]
+    )
     if (!entry) return res.status(404).json({ message: 'Subject not found.' })
-    if (entry.assigned_instructor_id) return res.status(400).json({ message: 'This subject already has an instructor.' })
+    // A real instructor already teaching it — no need to borrow anyone. A
+    // placeholder ("Instructor A") doesn't count as a real assignment: the
+    // whole point of borrowing is that nobody in this department is actually
+    // available, so starting the request detaches it from the placeholder.
+    if (entry.assigned_instructor_id && !entry.instructor_is_placeholder) {
+      return res.status(400).json({ message: 'This subject already has an instructor.' })
+    }
 
     const [[me]] = await pool.query('SELECT name, department FROM users WHERE id = ?', [req.user.id])
     if (!me.department) return res.status(400).json({ message: 'Your account has no department set.' })
@@ -76,6 +87,9 @@ router.post('/', authenticate, authorize('chair'), async (req, res) => {
     const deanA = await deanOf(me.department)
     if (!deanA) return res.status(400).json({ message: `Your college (${me.department}) has no Dean account yet. Ask the Admin to add one first.` })
 
+    if (entry.instructor_is_placeholder) {
+      await pool.query('UPDATE faculty_load_entries SET assigned_instructor_id = NULL WHERE id = ?', [entry_id])
+    }
     const [r] = await pool.query(
       `INSERT INTO cross_dept_chain (entry_id, requested_by, requester_department, target_department, note, dean_a_id)
        VALUES (?, ?, ?, ?, ?, ?)`,
