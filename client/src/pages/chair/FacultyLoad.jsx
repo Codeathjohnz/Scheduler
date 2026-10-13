@@ -2186,7 +2186,10 @@ export default function FacultyLoad() {
 
       {/* Assign from Unassigned modal */}
       {assignTarget && (() => {
-        const unassignedEntries = entries.filter(e => !e.assigned_instructor_id)
+        // GE/PATHFIT never go here — the GE Coordinator assigns those
+        // centrally, and the server rejects a chair picking one directly
+        // regardless of who they're trying to assign it to.
+        const unassignedEntries = entries.filter(e => !e.assigned_instructor_id && !/^(GE|PATHFIT)\b/i.test(e.course_code))
         return (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto">
@@ -2201,7 +2204,7 @@ export default function FacultyLoad() {
               </div>
               <div className="px-6 py-5">
                 {unassignedEntries.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-6">No unassigned subjects right now.</p>
+                  <p className="text-sm text-gray-400 text-center py-6">No unassigned subjects right now — GE/PATHFIT subjects aren't picked here; the GE Coordinator assigns those.</p>
                 ) : (
                   <div className="space-y-2">
                     {unassignedEntries.map(e => (
