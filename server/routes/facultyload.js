@@ -38,10 +38,6 @@ export async function syncConfirmation(chairId, academicYear, semester, instruct
 export const TARGET_UNITS = 21
 export const MAX_UNITS = 27
 
-function unitCredit(lecHours, labHours) {
-  return Number(lecHours || 0) + Number(labHours || 0) * 0.75
-}
-
 // Four disjoint instructor pools: General Education ("GE" prefix), PATHFIT
 // ("PATHFIT" prefix), NSTP ("NSTP" prefix — with or without a trailing
 // number, since some prospectuses code it as bare "NSTP"), and major/
@@ -51,11 +47,20 @@ function unitCredit(lecHours, labHours) {
 export function isGeneralEd(courseCode) {
   return /^GE\b/i.test(String(courseCode || '').trim())
 }
-function isPathfit(courseCode) {
+export function isPathfit(courseCode) {
   return /^PATHFIT\b/i.test(String(courseCode || '').trim())
 }
 function isNstp(courseCode) {
   return /^NSTP\b/i.test(String(courseCode || '').trim())
+}
+// GE and PATHFIT have no department of their own — their instructors teach
+// every college's students — so both are assigned centrally by the GE
+// Coordinator rather than picked directly by each chair. Returns the pool's
+// department name ('General Education' / 'PATHFIT') or null for anything else.
+export function coordinatorPool(courseCode) {
+  if (isGeneralEd(courseCode)) return 'General Education'
+  if (isPathfit(courseCode)) return 'PATHFIT'
+  return null
 }
 
 // An instructor's total load for the cap = teaching unit credit (faculty_load_entries,
@@ -132,7 +137,7 @@ async function programMismatchProblem(instructorId, subjectId) {
   if (!inst || !subj?.program || !inst.programs) return null
   const allowed = inst.programs.split(',').map(programKey)
   if (allowed.includes(programKey(subj.program))) return null
-  return `${inst.name} teaches for ${inst.programs} — this subject belongs to the ${subj.program} prospectus. Pick an instructor tagged for ${subj.program} (My Specialty), or untag them from ${inst.programs} first if that's wrong.`
+  return `${inst.name} teaches for ${inst.programs} — this subject belongs to the ${subj.program} prospectus. Pick an instructor tagged for ${subj.program}, or fix their programs under Manage Users if that's wrong.`
 }
 
 // GET /api/faculty-load/section-counts?year=&semester=  — { [year_level]: section_count }
@@ -362,8 +367,8 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
     if (cross) {
       return res.status(400).json({ message: `${cross.name} is from ${cross.department} — to borrow them, ask your Dean under Teaching Requests → Request an Instructor. Leave this subject unassigned for now.` })
     }
-    if (assigned_instructor_id && req.user.role === 'chair' && isGeneralEd(subject.course_code)) {
-      return res.status(400).json({ message: 'GE subjects are assigned by the GE Coordinator, not picked here. Save this unassigned — it will appear in their queue automatically.' })
+    if (assigned_instructor_id && req.user.role === 'chair' && coordinatorPool(subject.course_code)) {
+      return res.status(400).json({ message: `${coordinatorPool(subject.course_code)} subjects are assigned by the GE Coordinator, not picked here. Save this unassigned — it will appear in their queue automatically.` })
     }
     if (assigned_instructor_id) {
       const problem = await programMismatchProblem(assigned_instructor_id, subject_id)
@@ -413,8 +418,8 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
       if (cross) {
         return res.status(400).json({ message: `${cross.name} is from ${cross.department} — to borrow them, ask your Dean under Teaching Requests → Request an Instructor. Leave this subject unassigned for now.` })
       }
-      if (assigned_instructor_id && req.user.role === 'chair' && isGeneralEd(effectiveCourseCode)) {
-        return res.status(400).json({ message: 'GE subjects are assigned by the GE Coordinator, not picked here. Leave this unassigned — it will appear in their queue automatically.' })
+      if (assigned_instructor_id && req.user.role === 'chair' && coordinatorPool(effectiveCourseCode)) {
+        return res.status(400).json({ message: `${coordinatorPool(effectiveCourseCode)} subjects are assigned by the GE Coordinator, not picked here. Leave this unassigned — it will appear in their queue automatically.` })
       }
       if (assigned_instructor_id) {
         const problem = await programMismatchProblem(assigned_instructor_id, subject_id || before.subject_id)
@@ -491,14 +496,17 @@ router.delete('/admin-load/:id', authenticate, authorize('chair', 'admin'), asyn
   }
 })
 
-// POST /api/faculty-load/auto-generate
+// POST /api/faculty-load/auto-generate — builds the term's subject/section
+// roster from a prospectus. It never picks an instructor for anything: every
+// row comes out unassigned, whether it's a major subject (the chair fills it
+// via Placeholders → swap in a real instructor) or a GE/PATHFIT subject (the
+// GE Coordinator fills it centrally). Specialty-based auto-matching was
+// removed — two chairs running this independently could no longer silently
+// overload the same shared-pool instructor, and a placeholder standing in for
+// "nobody yet" is a clearer state than a guessed specialist.
 router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (req, res) => {
   const { academic_year, semester, prospectus_id, clear_existing } = req.body
   try {
-    // Get the chair's department so we only assign instructors from same dept
-    const [[chair]] = await pool.query('SELECT department FROM users WHERE id=?', [req.user.id])
-    const dept = chair?.department
-
     // Get subjects to assign
     let subjects
     if (prospectus_id) {
@@ -563,181 +571,35 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
       }
     }
 
-    // Get instructors from the chair's department, plus General Education,
-    // PATHFIT, and NSTP (all always included — every program's curriculum
-    // includes their subjects)
-    const deptFilter = dept
-      ? "AND (u.department = ? OR u.department = 'General Education' OR u.department = 'PATHFIT' OR u.department = 'NSTP')"
-      : ''
-    const deptParam = dept ? [dept] : []
-    const [instructors] = await pool.query(`
-      SELECT u.id, u.name, u.department, u.programs,
-        GROUP_CONCAT(CONCAT(isp.subject_id, ':', isp.priority)) AS specialty_ids
-      FROM users u
-      LEFT JOIN instructor_specialties isp ON isp.instructor_id = u.id
-      WHERE u.role IN ('instructor', 'chair', 'dean') AND u.is_placeholder = 0 ${deptFilter}
-      GROUP BY u.id
-      ORDER BY u.name
-    `, deptParam)
-
-    // Current total unit loads for this term (running tally — updated as we assign).
-    // Starts from teaching units PLUS any approved administrative/research/
-    // extension/project load, so the 21/27 cap reflects an instructor's whole
-    // load, not just what's being taught.
-    const otherLoadMap = await getOtherLoadMap(academic_year, semester)
-    const loadMap = await getCombinedLoadMap(academic_year, semester)
-
-    // Build map: subject_id → { 1: [first-priority instructor ids], 2: [second-priority ids] }
-    // Each instructor tags every specialty as 1st or 2nd priority (My Specialty page).
-    const specialtyMap = {}
-    for (const inst of instructors) {
-      const picks = inst.specialty_ids ? inst.specialty_ids.split(',') : []
-      for (const pick of picks) {
-        const [sid, prio] = pick.split(':').map(Number)
-        if (!specialtyMap[sid]) specialtyMap[sid] = { 1: [], 2: [] }
-        specialtyMap[sid][prio === 2 ? 2 : 1].push(inst.id)
-      }
-    }
-    // Partition the pool so PATHFIT subjects only draw from PATHFIT instructors,
-    // NSTP subjects only draw from NSTP instructors, and major subjects only
-    // draw from department instructors — never mixed. GE subjects are never
-    // auto-assigned here at all: they're left unassigned for the GE
-    // Coordinator, who assigns centrally across every college (see
-    // routes/geCoordinator.js) — picking one here per-chair risked two
-    // colleges independently overloading the same GE instructor.
-    const pathfitInstructorIds = instructors.filter(i => i.department === 'PATHFIT').map(i => i.id)
-    const nstpInstructorIds    = instructors.filter(i => i.department === 'NSTP').map(i => i.id)
-    // An instructor can be tagged with the programs they teach for (e.g. BSIT,
-    // BSIS or both — set by the admin or on their My Specialty page). One who
-    // is tagged is only eligible for a chair whose prospectus is one of those
-    // programs; untagged instructors stay eligible for every program in the
-    // department, as before.
-    const teachesProgram = (i) => {
-      const list = String(i.programs || '').split(',').map(programKey).filter(Boolean)
-      return !list.length || list.includes(programKey(program))
-    }
-    const majorInstructorIds   = instructors.filter(i =>
-      i.department !== 'General Education' && i.department !== 'PATHFIT' && i.department !== 'NSTP' && teachesProgram(i)
-    ).map(i => i.id)
-
-    // Clear existing entries first if requested
-    let existingMap = new Map()
+    // Safe to re-run: match against what's already there (by subject +
+    // section) instead of blindly inserting a duplicate batch. Anything
+    // already on the sheet — assigned or still on a placeholder — is left
+    // completely untouched; only a genuinely new subject/section is inserted.
+    let existingKeys = new Set()
     if (clear_existing) {
       await pool.query(
         'DELETE FROM faculty_load_entries WHERE academic_year=? AND semester=? AND chair_id=?',
         [academic_year, semester, req.user.id]
       )
-      // Reset the teaching portion, but keep each instructor's approved
-      // administrative/research/extension/project load — that isn't touched
-      // by this delete, so it still counts toward the cap.
-      Object.keys(loadMap).forEach(k => { delete loadMap[k] })
-      Object.assign(loadMap, otherLoadMap)
     } else {
-      // Safe to re-run: match against what's already there (by subject +
-      // section) instead of blindly inserting a duplicate batch. An
-      // already-assigned entry is left untouched; an unassigned one is a
-      // candidate to fill now — e.g. an instructor added a specialty after
-      // the first run and is only now eligible for a subject that was
-      // generated but left unassigned.
       const [existingRows] = await pool.query(
-        'SELECT id, subject_id, program_yr_sec, assigned_instructor_id FROM faculty_load_entries WHERE academic_year=? AND semester=? AND chair_id=?',
+        'SELECT subject_id, program_yr_sec FROM faculty_load_entries WHERE academic_year=? AND semester=? AND chair_id=?',
         [academic_year, semester, req.user.id]
       )
-      for (const e of existingRows) existingMap.set(`${e.subject_id}|${e.program_yr_sec}`, e)
+      existingKeys = new Set(existingRows.map(e => `${e.subject_id}|${e.program_yr_sec}`))
     }
-
-    // ── Priority-ordered assignment ────────────────────────────────────────────
-    // Every specialty is tagged 1st or 2nd priority by the instructor. Subjects
-    // are handed out in passes so first choices always win before any second
-    // choice is considered, and an instructor only picks up their second-priority
-    // subjects once they still have room under the standard load:
-    //   1. FIRST-priority specialists with room within TARGET_UNITS (21)
-    //   2. SECOND-priority specialists with room within TARGET_UNITS
-    //   3. Overflow: first- then second-priority specialists up to MAX_UNITS (27)
-    //   4. Last resort: a specialist even past MAX_UNITS, rather than leaving a
-    //      specialized subject unassigned — the chair sees the visible overload
-    //      on their card and can rebalance before submitting.
-    // A subject with no specialist at all is left unassigned for the chair to
-    // assign manually. Within a subject, all its sections stick with the same
-    // instructor (BSIT 2A, 2B, 2C of one course go to one person) for as long as
-    // they have room, and only then spill to the next specialist. GE subjects
-    // only draw from GE instructors, PATHFIT from PATHFIT, NSTP from NSTP, and
-    // major subjects only from department instructors. NSTP never counts toward
-    // the cap, so it never uses up an instructor's room.
-    const byLoad = (ids) => [...new Set(ids)].sort((a, b) => (loadMap[a] || 0) - (loadMap[b] || 0))
-    const stickyBySubject = new Map()   // subject id → instructor already teaching its earlier sections
-    for (const e of existingMap.values()) {
-      if (e.assigned_instructor_id && !stickyBySubject.has(e.subject_id)) stickyBySubject.set(e.subject_id, e.assigned_instructor_id)
-    }
-
-    const pending = []   // { idx, sub, credit, first[], second[] } for entries that still need an instructor
-    expandedSubjects.forEach((sub, idx) => {
-      const existing = existingMap.get(`${sub.id}|${sub.program_yr_sec}`)
-      if (existing?.assigned_instructor_id) return
-      const eligiblePool = isGeneralEd(sub.course_code) ? []   // never auto-assigned — left for the GE Coordinator
-        : isPathfit(sub.course_code) ? pathfitInstructorIds
-        : isNstp(sub.course_code) ? nstpInstructorIds
-        : majorInstructorIds
-      const tiers = specialtyMap[sub.id] || { 1: [], 2: [] }
-      pending.push({
-        idx, sub,
-        credit: isNstp(sub.course_code) ? 0 : creditOf(sub),
-        first:  tiers[1].filter(id => eligiblePool.includes(id)),
-        second: tiers[2].filter(id => eligiblePool.includes(id)),
-      })
-    })
-
-    const assignments = new Map()   // expandedSubjects index → instructor id
-    const give = (p, id) => {
-      assignments.set(p.idx, id)
-      loadMap[id] = (loadMap[id] || 0) + p.credit
-      stickyBySubject.set(p.sub.id, id)
-    }
-    // Try one tier: the subject's current instructor first (keeps sections together),
-    // otherwise the least-loaded specialist who still fits under `limit`.
-    const tryTier = (p, ids, limit) => {
-      const sticky = stickyBySubject.get(p.sub.id)
-      if (sticky && ids.includes(sticky) && (loadMap[sticky] || 0) + p.credit <= limit) { give(p, sticky); return true }
-      const pick = byLoad(ids).find(id => (loadMap[id] || 0) + p.credit <= limit)
-      if (pick == null) return false
-      give(p, pick)
-      return true
-    }
-    const runPass = (fn) => { for (const p of pending) if (!assignments.has(p.idx)) fn(p) }
-
-    runPass(p => tryTier(p, p.first,  TARGET_UNITS))
-    runPass(p => tryTier(p, p.second, TARGET_UNITS))
-    runPass(p => tryTier(p, p.first,  MAX_UNITS) || tryTier(p, p.second, MAX_UNITS))
-    runPass(p => {
-      const last = byLoad(p.first)[0] ?? byLoad(p.second)[0]
-      if (last != null) give(p, last)
-    })
 
     const rows = []
-    const toFill = []   // [assignedId, entryId] — existing unassigned entries now filled
-    let alreadyAssignedCount = 0
-    let stillUnassignedCount = 0
-    expandedSubjects.forEach((sub, idx) => {
-      const existing = existingMap.get(`${sub.id}|${sub.program_yr_sec}`)
-      if (existing?.assigned_instructor_id) {
-        alreadyAssignedCount++
-        return
-      }
-      const assignedId = assignments.get(idx) ?? null
-
-      if (existing) {
-        if (assignedId) toFill.push([assignedId, existing.id])
-        else stillUnassignedCount++
-        return
-      }
-
+    let alreadyPresentCount = 0
+    expandedSubjects.forEach(sub => {
+      if (existingKeys.has(`${sub.id}|${sub.program_yr_sec}`)) { alreadyPresentCount++; return }
       rows.push([
         academic_year, semester,
         sub.course_code, sub.descriptive_title,
         sub.program_yr_sec,
         sub.year_level || null,
         sub.units, sub.lec_hours, sub.lab_hours,
-        assignedId, null, sub.id, req.user.id
+        null, null, sub.id, req.user.id
       ])
     })
 
@@ -749,20 +611,12 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
         VALUES ?
       `, [rows])
     }
-    for (const [assignedId, entryId] of toFill) {
-      await pool.query('UPDATE faculty_load_entries SET assigned_instructor_id=? WHERE id=?', [assignedId, entryId])
-    }
 
-    const newlyAssignedIds = [...new Set([...rows.map(r => r[9]), ...toFill.map(f => f[0])].filter(Boolean))]
-    for (const id of newlyAssignedIds) {
-      await syncConfirmation(req.user.id, academic_year, semester, id)
-    }
-
-    const newlyAssignedCount = rows.filter(r => r[9] !== null).length + toFill.length
-    const newlyInsertedUnassignedCount = rows.filter(r => r[9] === null).length
-    const assigned = newlyAssignedCount + alreadyAssignedCount
-    const unassigned = newlyInsertedUnassignedCount + stillUnassignedCount
-    res.json({ count: assigned + unassigned, assigned, unassigned, dept })
+    res.json({
+      count: rows.length + alreadyPresentCount,
+      assigned: alreadyPresentCount, unassigned: rows.length,
+      message: `${rows.length} subject${rows.length === 1 ? '' : 's'} added, all unassigned. Major subjects: use Placeholders to park them on a mock instructor, then swap in a real one. GE/PATHFIT: the GE Coordinator will assign them.`,
+    })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }

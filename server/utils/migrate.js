@@ -483,6 +483,25 @@ const steps = [
       return true
     },
   },
+  // GE/PATHFIT subjects are now assigned centrally by the GE Coordinator and
+  // never land on a chair's placeholder ("Instructor A") going forward — but
+  // a chair could have already parked one there with "Fill Placeholders"
+  // before this shipped. Un-park any such row so it surfaces in the
+  // Coordinator's queue instead of staying hidden on a placeholder.
+  {
+    name: 'un-park any GE/PATHFIT subject already sitting on a placeholder',
+    async run(pool) {
+      const [rows] = await pool.query(`
+        SELECT fle.id, fle.course_code FROM faculty_load_entries fle
+        JOIN users u ON u.id = fle.assigned_instructor_id
+        WHERE u.is_placeholder = 1
+      `)
+      const toFree = rows.filter(r => /^GE\b/i.test(r.course_code) || /^PATHFIT\b/i.test(r.course_code)).map(r => r.id)
+      if (!toFree.length) return false
+      await pool.query('UPDATE faculty_load_entries SET assigned_instructor_id = NULL WHERE id IN (?)', [toFree])
+      return true
+    },
+  },
 ]
 
 export async function runMigrations(pool) {

@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
-import { getCombinedLoadMap, MAX_UNITS, isGeneralEd } from './facultyload.js'
+import { getCombinedLoadMap, MAX_UNITS, coordinatorPool } from './facultyload.js'
 import { notify } from '../utils/notify.js'
 
 const STAGE_LABEL = { dean: 'the Dean', chief_cpd: 'Chief Curriculum Planning and Development', qa: 'Quality Assurance', vpaa: 'the VPAA', admin: 'the Admin/Registrar' }
@@ -104,14 +104,14 @@ router.post('/from-faculty-load', authenticate, authorize('chair'), async (req, 
       })
     }
 
-    // GE subjects are assigned centrally by the GE Coordinator, not by this
-    // chair — one still unassigned here means it hasn't reached them yet
-    // (or they haven't gotten to it), not that nobody is available.
-    const unassignedGe = entries.filter(e => !e.assigned_instructor_id && isGeneralEd(e.course_code)).length
-    if (unassignedGe > 0) {
+    // GE and PATHFIT subjects are assigned centrally by the GE Coordinator,
+    // not by this chair — one still unassigned here means it hasn't reached
+    // them yet (or they haven't gotten to it), not that nobody is available.
+    const unassignedPool = entries.filter(e => !e.assigned_instructor_id && coordinatorPool(e.course_code)).length
+    if (unassignedPool > 0) {
       conn.release()
       return res.status(400).json({
-        message: `${unassignedGe} GE subject${unassignedGe > 1 ? 's are' : ' is'} still waiting on the GE Coordinator to assign an instructor. Submitting will have to wait until they do.`,
+        message: `${unassignedPool} GE/PATHFIT subject${unassignedPool > 1 ? 's are' : ' is'} still waiting on the GE Coordinator to assign an instructor. Submitting will have to wait until they do.`,
       })
     }
 

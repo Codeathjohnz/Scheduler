@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import toast from 'react-hot-toast'
 import { placeholdersAPI } from '../../services/api.js'
-import { Loader2, UserCheck, Sparkles, X, AlertTriangle, CheckCircle2, Clock, ArrowRight } from 'lucide-react'
+import { Loader2, UserCheck, X, AlertTriangle, CheckCircle2, Clock, ArrowRight } from 'lucide-react'
 
 const TARGET = 21
 const CAP = 27
@@ -24,8 +24,7 @@ function ReplaceModal({ ph, year, semester, onClose, onDone }) {
   const chosen = ph.subjects.flatMap(s => s.sections).filter(sec => eligible.has(sec.entry_id) && !skipped.has(sec.entry_id))
   const movable = chosen.reduce((a, sec) => a + sec.credit, 0)
   const projected = (cand?.current_units || 0) + movable
-  const matched = (cand?.matched_subjects || []).length > 0
-  const exception = !!cand && (projected > TARGET || !matched)
+  const exception = !!cand && projected > TARGET
   const overCap = projected > CAP
 
   const submit = async () => {
@@ -104,11 +103,7 @@ function ReplaceModal({ ph, year, semester, onClose, onDone }) {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold text-sm text-gray-800">{s.name}</span>
                         <span className="text-xs text-gray-400">{s.department}{s.role !== 'instructor' ? ` · ${s.role}` : ''}</span>
-                        {s.matched_subjects.length > 0
-                          ? <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-800"><Sparkles className="w-3 h-3" /> Specialty match</span>
-                          : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">No matching specialty</span>}
                       </div>
-                      {s.matched_subjects.length > 0 && <p className="text-xs text-green-700 mt-0.5">Teaches: {s.matched_subjects.join(', ')}</p>}
                       <p className="text-xs text-gray-500 mt-0.5">Load {s.current_units.toFixed(2)} → {s.projected_units.toFixed(2)} units{!s.fits && <span className="text-red-600 font-semibold"> · over the {CAP}-unit cap (pick fewer sections)</span>}</p>
                     </div>
                   </label>
@@ -140,7 +135,7 @@ function ReplaceModal({ ph, year, semester, onClose, onDone }) {
           {exception && !overCap && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
               <p className="text-xs text-amber-900 mb-2">
-                <strong>This is an exception</strong> ({projected > TARGET ? `over the standard ${TARGET}-unit load` : 'no matching specialty'}). Give a short reason — the Dean will see it flagged.
+                <strong>This is an exception</strong> (over the standard {TARGET}-unit load). Give a short reason — the Dean will see it flagged.
               </p>
               <input value={reason} onChange={e => setReason(e.target.value)} maxLength={255} placeholder="e.g. Only qualified IT instructor this term"
                 className="w-full border-2 border-amber-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 bg-white" />
@@ -184,8 +179,6 @@ export default function PlaceholdersPanel({ year, semester, refreshKey, onChange
 
   if (loading || (list.length === 0 && changes.length === 0)) return null
 
-  const hints = list.flatMap(ph => ph.suggestions.filter(s => s.matched_subjects.length > 0).slice(0, 1).map(s => ({ ph, s })))
-
   return (
     <div className="mb-6 bg-white rounded-2xl shadow-sm border-2 border-indigo-200 overflow-hidden">
       <div className="px-5 py-3 bg-indigo-50 border-b border-indigo-100">
@@ -193,23 +186,12 @@ export default function PlaceholdersPanel({ year, semester, refreshKey, onChange
         <p className="text-xs text-indigo-700 mt-0.5">Stand-ins that hold subjects until a real instructor is found, so the load can still be approved and scheduled. When someone suitable arrives, swap them in.</p>
       </div>
 
-      {hints.length > 0 && (
-        <div className="px-5 py-3 bg-green-50 border-b border-green-100 space-y-1">
-          {hints.map(({ ph, s }) => (
-            <p key={`${ph.id}-${s.id}`} className="text-xs text-green-900 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-green-600 shrink-0" />
-              <span><strong>{s.name}</strong> teaches {s.matched_subjects.join(', ')} — they can replace <strong>{ph.name}</strong>.</span>
-            </p>
-          ))}
-        </div>
-      )}
-
       <div className="divide-y divide-gray-100">
         {list.map(ph => (
           <div key={ph.id} className="px-5 py-4 flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="font-bold text-gray-800 text-sm">{ph.name} <span className="ml-2 text-xs font-semibold text-gray-400">{ph.units.toFixed(2)} units</span></p>
-              <p className="text-[11px] text-gray-400 mt-0.5 uppercase tracking-wide">Specialty basis — the subjects it holds</p>
+              <p className="text-[11px] text-gray-400 mt-0.5 uppercase tracking-wide">Subjects it holds</p>
               <ul className="mt-1 text-sm text-gray-700 space-y-0.5">
                 {ph.subjects.map(s => (
                   <li key={s.course_code}><span className="font-mono font-semibold text-green-800 text-xs">{s.course_code}</span> {s.title}

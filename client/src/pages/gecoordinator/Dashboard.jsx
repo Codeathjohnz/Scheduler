@@ -9,10 +9,13 @@ import { useAuth } from '../../context/AuthContext.jsx'
 import { Loader2, Check, ArrowRight, Users, Inbox, CheckCircle2 } from 'lucide-react'
 
 const SEM = { 1: '1st Sem', 2: '2nd Sem', 3: 'Summer' }
+const POOL_BADGE = { 'General Education': 'bg-lime-100 text-lime-800', PATHFIT: 'bg-sky-100 text-sky-800' }
 
 function Row({ r, instructors, busy, onAssign }) {
   const [pickId, setPickId] = useState('')
-  const picked = instructors.find(i => String(i.id) === String(pickId))
+  // A GE row can only go to a GE instructor, a PATHFIT row only to PATHFIT — never mixed.
+  const poolInstructors = instructors.filter(i => i.department === r.pool)
+  const picked = poolInstructors.find(i => String(i.id) === String(pickId))
   const add = creditOf(r)
   const projected = picked ? picked.current_units + add : null
   const willExceed = picked && projected > 27
@@ -21,7 +24,9 @@ function Row({ r, instructors, busy, onAssign }) {
     <div className="bg-white rounded-xl border border-gray-200 px-4 py-3 space-y-2">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="font-mono font-bold text-sm text-green-800">{r.course_code} <span className="font-sans font-normal text-gray-700">— {r.descriptive_title}</span></p>
+          <p className="font-mono font-bold text-sm text-green-800">{r.course_code} <span className="font-sans font-normal text-gray-700">— {r.descriptive_title}</span>
+            <span className={`ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full ${POOL_BADGE[r.pool] || 'bg-gray-100 text-gray-700'}`}>{r.pool}</span>
+          </p>
           <p className="text-xs text-gray-500 mt-0.5">{r.program_yr_sec} · {add.toFixed(2)} unit credit</p>
         </div>
         <span className="text-xs font-semibold text-gray-500">{r.chair_department} <span className="text-gray-400">· {r.chair_name}</span></span>
@@ -29,8 +34,8 @@ function Row({ r, instructors, busy, onAssign }) {
       <div className="flex flex-wrap items-center gap-2">
         <select value={pickId} onChange={e => setPickId(e.target.value)}
           className="flex-1 min-w-[220px] border-2 border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-green-500">
-          <option value="">— Pick a GE instructor —</option>
-          {instructors.map(i => (
+          <option value="">— Pick a {r.pool} instructor —</option>
+          {poolInstructors.map(i => (
             <option key={i.id} value={i.id}>{i.name} — {i.current_units.toFixed(2)} units loaded</option>
           ))}
         </select>
@@ -66,9 +71,9 @@ export default function GECoordinatorDashboard() {
         facultyLoadAPI.getAllInstructors(year, semester),
       ])
       setQueue(q.data)
-      setInstructors(all.data.filter(i => i.department === 'General Education'))
+      setInstructors(all.data.filter(i => i.department === 'General Education' || i.department === 'PATHFIT'))
     } catch {
-      toast.error('Failed to load the GE queue.')
+      toast.error('Failed to load the queue.')
     } finally {
       setLoading(false)
     }
@@ -102,7 +107,7 @@ export default function GECoordinatorDashboard() {
     <div>
       <PageHeader
         title={`Welcome, ${user?.name}`}
-        subtitle="Assign a GE instructor to every college's General Education subjects. A chair adds the subject and section; you pick who teaches it."
+        subtitle="Assign a GE or PATHFIT instructor to every college's subjects. A chair adds the subject and section; you pick who teaches it."
       />
       <NotificationBox />
 
@@ -122,9 +127,9 @@ export default function GECoordinatorDashboard() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-        <StatCard label="Unassigned GE Subjects" value={String(queue.length)} icon={Inbox} color="gold" />
-        <StatCard label="Colleges Waiting"        value={String(colleges.length)} icon={Users} color="teal" />
-        <StatCard label="GE Instructors"          value={String(instructors.length)} icon={CheckCircle2} color="green" />
+        <StatCard label="Unassigned Subjects" value={String(queue.length)} icon={Inbox} color="gold" />
+        <StatCard label="Colleges Waiting"    value={String(colleges.length)} icon={Users} color="teal" />
+        <StatCard label="GE/PATHFIT Instructors" value={String(instructors.length)} icon={CheckCircle2} color="green" />
       </div>
 
       {loading ? (
@@ -132,7 +137,7 @@ export default function GECoordinatorDashboard() {
       ) : queue.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-200 flex flex-col items-center py-14 text-gray-400">
           <CheckCircle2 className="w-8 h-8 mb-2 opacity-40" />
-          <p className="text-sm">Every college's GE subjects for this term are assigned.</p>
+          <p className="text-sm">Every college's GE and PATHFIT subjects for this term are assigned.</p>
         </div>
       ) : (
         <div className="space-y-6">

@@ -1,24 +1,24 @@
 import { Router } from 'express'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
-import { getCombinedLoadMap, MAX_UNITS, syncConfirmation, isGeneralEd } from './facultyload.js'
+import { getCombinedLoadMap, MAX_UNITS, syncConfirmation, coordinatorPool } from './facultyload.js'
 import { creditOf } from '../utils/unitCredit.js'
 import { notify } from '../utils/notify.js'
 
 /**
- * GE Coordinator — General Education has no department of its own; its
+ * GE Coordinator — GE and PATHFIT have no department of their own; their
  * instructors teach every college's students. Rather than each chair
- * separately drawing from the shared GE pool (risking two colleges
- * independently overloading the same GE instructor on the same day), one
- * coordinator account assigns every college's GE subjects centrally. A chair
- * still adds the GE subject to their own course offering (section, room — only
- * they know their own schedule), just never picks who teaches it; it appears
- * here, unassigned, the moment they save it, and this assignment is what then
- * shows up back on their Faculty Load page.
+ * separately drawing from a shared pool (risking two colleges independently
+ * overloading the same GE or PATHFIT instructor on the same day), one
+ * coordinator account assigns every college's GE and PATHFIT subjects
+ * centrally. A chair still adds the subject to their own course offering
+ * (section, room — only they know their own schedule), just never picks who
+ * teaches it; it appears here, unassigned, the moment they save it, and this
+ * assignment is what then shows up back on their Faculty Load page.
  */
 const router = Router()
 
-// GET /api/ge-coordinator/queue?year=&semester= — every college's unassigned GE subjects
+// GET /api/ge-coordinator/queue?year=&semester= — every college's unassigned GE/PATHFIT subjects
 router.get('/queue', authenticate, authorize('ge_coordinator', 'admin'), async (req, res) => {
   const { year = '2026-2027', semester = 1 } = req.query
   try {
@@ -29,13 +29,13 @@ router.get('/queue', authenticate, authorize('ge_coordinator', 'admin'), async (
       WHERE fle.academic_year = ? AND fle.semester = ? AND fle.assigned_instructor_id IS NULL
       ORDER BY chairUser.department, fle.program_yr_sec
     `, [year, semester])
-    res.json(rows.filter(r => isGeneralEd(r.course_code)))
+    res.json(rows.filter(r => coordinatorPool(r.course_code)).map(r => ({ ...r, pool: coordinatorPool(r.course_code) })))
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
 })
 
-// GET /api/ge-coordinator/assigned?year=&semester= — recent GE assignments, for a sanity check across colleges
+// GET /api/ge-coordinator/assigned?year=&semester= — recent assignments, for a sanity check across colleges
 router.get('/assigned', authenticate, authorize('ge_coordinator', 'admin'), async (req, res) => {
   const { year = '2026-2027', semester = 1 } = req.query
   try {
@@ -44,7 +44,7 @@ router.get('/assigned', authenticate, authorize('ge_coordinator', 'admin'), asyn
       FROM faculty_load_entries fle
       JOIN users chairUser ON chairUser.id = fle.chair_id
       JOIN users inst ON inst.id = fle.assigned_instructor_id
-      WHERE fle.academic_year = ? AND fle.semester = ? AND inst.department = 'General Education'
+      WHERE fle.academic_year = ? AND fle.semester = ? AND inst.department IN ('General Education', 'PATHFIT')
       ORDER BY fle.id DESC LIMIT 100
     `, [year, semester])
     res.json(rows)
@@ -53,21 +53,22 @@ router.get('/assigned', authenticate, authorize('ge_coordinator', 'admin'), asyn
   }
 })
 
-// PATCH /api/ge-coordinator/:entryId/assign — pick a GE instructor for one college's subject
+// PATCH /api/ge-coordinator/:entryId/assign — pick a GE or PATHFIT instructor for one college's subject
 router.patch('/:entryId/assign', authenticate, authorize('ge_coordinator', 'admin'), async (req, res) => {
   const { instructor_id } = req.body
   if (!instructor_id) return res.status(400).json({ message: 'Choose an instructor.' })
   try {
     const [[entry]] = await pool.query('SELECT * FROM faculty_load_entries WHERE id = ?', [req.params.entryId])
     if (!entry) return res.status(404).json({ message: 'Entry not found.' })
-    if (!isGeneralEd(entry.course_code)) return res.status(400).json({ message: 'That subject is not a GE subject.' })
+    const poolName = coordinatorPool(entry.course_code)
+    if (!poolName) return res.status(400).json({ message: 'That subject is not a GE or PATHFIT subject.' })
     if (entry.assigned_instructor_id) return res.status(409).json({ message: 'This subject already has an instructor.' })
 
     const [[inst]] = await pool.query(
-      "SELECT id, name FROM users WHERE id = ? AND department = 'General Education' AND role IN ('instructor','chair','dean') AND is_placeholder = 0",
-      [instructor_id]
+      "SELECT id, name FROM users WHERE id = ? AND department = ? AND role IN ('instructor','chair','dean') AND is_placeholder = 0",
+      [instructor_id, poolName]
     )
-    if (!inst) return res.status(400).json({ message: 'Pick a General Education instructor.' })
+    if (!inst) return res.status(400).json({ message: `Pick a ${poolName} instructor.` })
 
     const load = (await getCombinedLoadMap(entry.academic_year, entry.semester))[inst.id] || 0
     const add = creditOf(entry)

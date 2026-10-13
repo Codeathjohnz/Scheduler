@@ -1,7 +1,7 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from '../components/common/Sidebar.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { LayoutDashboard, CalendarDays, BookOpen, Briefcase, GraduationCap, Accessibility, CheckSquare, ClipboardList, ArrowLeftRight , Bell} from 'lucide-react'
+import { LayoutDashboard, CalendarDays, BookOpen, Briefcase, Accessibility, CheckSquare, ClipboardList, ArrowLeftRight , Bell} from 'lucide-react'
 
 const nav = [
   { to: '/chair', icon: LayoutDashboard, label: 'Dashboard' },
@@ -11,7 +11,6 @@ const nav = [
   { to: '/chair/my-load', icon: ClipboardList, label: 'My Faculty Load' },
   { to: '/chair/teaching-requests', icon: ArrowLeftRight, label: 'Teaching Requests' },
   { to: '/chair/confirm-load', icon: CheckSquare, label: 'Confirm My Load' },
-  { to: '/chair/specialty', icon: GraduationCap, label: 'My Specialty' },
   { to: '/chair/accessibility', icon: Accessibility, label: 'Accessibility Request' },
   { to: '/chair/notifications', icon: Bell, label: 'Notifications' },
   { to: '/chair/confirmations', icon: CheckSquare, label: 'Load Confirmations' },

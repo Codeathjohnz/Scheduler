@@ -60,7 +60,6 @@ import TeachingRequests from './pages/shared/TeachingRequests.jsx'
 import NotificationsPage from './pages/shared/NotificationsPage.jsx'
 import ChairConfirmations from './pages/chair/ChairConfirmations.jsx'
 import ScheduleHistory from './pages/admin/ScheduleHistory.jsx'
-import InstructorSpecialty from './pages/instructor/MySpecialty.jsx'
 import InstructorAccessibility from './pages/instructor/AccessibilityRequest.jsx'
 import InstructorLoadRequest from './pages/instructor/LoadRequest.jsx'
 
@@ -114,7 +113,6 @@ export default function App() {
             <Route path="my-load" element={<InstructorMyLoad />} />
             <Route path="teaching-requests" element={<TeachingRequests />} />
             <Route path="confirm-load" element={<InstructorConfirmLoad />} />
-            <Route path="specialty" element={<InstructorSpecialty />} />
             <Route path="accessibility" element={<InstructorAccessibility />} />
           </Route>
 
@@ -126,7 +124,6 @@ export default function App() {
             <Route path="my-load" element={<InstructorMyLoad />} />
             <Route path="teaching-requests" element={<TeachingRequests />} />
             <Route path="confirm-load" element={<InstructorConfirmLoad />} />
-            <Route path="specialty" element={<InstructorSpecialty />} />
             <Route path="accessibility" element={<InstructorAccessibility />} />
             <Route path="signature" element={<SignatureSettings />} />
           </Route>
@@ -182,7 +179,6 @@ export default function App() {
             <Route path="my-load" element={<InstructorMyLoad />} />
             <Route path="teaching-requests" element={<TeachingRequests />} />
             <Route path="confirm-load" element={<InstructorConfirmLoad />} />
-            <Route path="specialty" element={<InstructorSpecialty />} />
             <Route path="accessibility" element={<InstructorAccessibility />} />
             <Route path="load-request" element={<InstructorLoadRequest />} />
           </Route>

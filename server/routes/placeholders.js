@@ -4,30 +4,34 @@ import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import pool from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
-import { getCombinedLoadMap, MAX_UNITS, TARGET_UNITS, syncConfirmation } from './facultyload.js'
+import { getCombinedLoadMap, MAX_UNITS, TARGET_UNITS, syncConfirmation, coordinatorPool } from './facultyload.js'
 import { rescheduleConflicts } from '../utils/rescheduleEntries.js'
 import { notify, adminIds, deanIds } from '../utils/notify.js'
 
 /**
  * Placeholder instructors — "Instructor A, B, C…"
  *
- * A subject nobody can teach yet is parked on a placeholder so the faculty load
- * can still be completed, approved, and scheduled. A placeholder is an ordinary
- * (hidden, login-less) instructor row, so everything that already works for
- * people — the 21/27 unit cap, schedule conflict checks, the load sheet — works
- * for it too. Its "specialty" is simply the subjects it holds, and when a real
- * instructor whose specialties match arrives, the chair swaps them in.
+ * A major-department subject nobody can teach yet is parked on a placeholder
+ * so the faculty load can still be completed, approved, and scheduled. A
+ * placeholder is an ordinary (hidden, login-less) instructor row, so
+ * everything that already works for people — the 21/27 unit cap, schedule
+ * conflict checks, the load sheet — works for it too. The chair swaps in a
+ * real instructor from their own department whenever one is available.
+ *
+ * GE and PATHFIT subjects never land on a chair's placeholder at all — they
+ * stay genuinely unassigned so they show up in the GE Coordinator's
+ * cross-college queue (routes/geCoordinator.js), which assigns them
+ * centrally instead.
  *
  * WHO CONFIRMS A SWAP (deliberately not the whole approval chain again): the
  * subjects, sections, units and total load that were approved don't change —
  * only the name on them does. So the CHAIR makes the swap, the NEW INSTRUCTOR
  * confirms their own load with one click, and the DEAN and REGISTRAR are
- * notified (not asked) and can see it in the change log. Anything unusual —
- * over the 21-unit standard load, or no matching specialty — needs a written
- * reason and is flagged "exception" to the Dean. The 27-unit cap can never be
- * exceeded, and only same-department instructors (plus the shared GE/PATHFIT/
- * NSTP pools for those subjects) can be swapped in directly; anyone else goes
- * through the cross-department request flow.
+ * notified (not asked) and can see it in the change log. Going over the
+ * 21-unit standard load needs a written reason, flagged "exception" to the
+ * Dean; the 27-unit cap can never be exceeded. Only same-department
+ * instructors can be swapped in directly; anyone else goes through the
+ * cross-department request flow.
  */
 const router = Router()
 
@@ -76,22 +80,33 @@ async function myPlaceholders(chairId) {
 }
 
 // ── POST /api/placeholders/fill ────────────────────────────────────────────────
-// Park every still-unassigned subject on "Instructor A/B/C…" (21 units each,
-// all sections of a subject kept together), reusing existing placeholders that
-// still have room before creating a new one.
+// Park every still-unassigned MAJOR subject on "Instructor A/B/C…" (21 units
+// each, all sections of a subject kept together), reusing existing
+// placeholders that still have room before creating a new one. GE/PATHFIT
+// subjects are left out on purpose — they stay unassigned so they show up in
+// the GE Coordinator's queue instead of disappearing onto a chair-owned
+// placeholder.
 router.post('/fill', authenticate, authorize('chair'), async (req, res) => {
   const { academic_year, semester } = req.body
   if (!academic_year || !semester) return res.status(400).json({ message: 'academic_year and semester are required.' })
   try {
     const chair = await chairInfo(req.user.id)
-    const [entries] = await pool.query(
+    const [allEntries] = await pool.query(
       `SELECT e.* FROM faculty_load_entries e
        WHERE e.chair_id = ? AND e.academic_year = ? AND e.semester = ? AND e.assigned_instructor_id IS NULL
-         AND NOT EXISTS (SELECT 1 FROM cross_dept_requests r WHERE r.entry_id = e.id AND r.status IN ('pending_instructor', 'pending_home'))
+         AND NOT EXISTS (SELECT 1 FROM cross_dept_chain c WHERE c.entry_id = e.id AND c.stage NOT IN ('finalized', 'declined', 'cancelled'))
        ORDER BY e.year_level, e.subject_id, e.id`,
       [req.user.id, academic_year, semester]
     )
-    if (!entries.length) return res.json({ assigned: 0, created: 0, message: 'Nothing is unassigned.' })
+    const entries = allEntries.filter(e => !coordinatorPool(e.course_code))
+    if (!entries.length) {
+      return res.json({
+        assigned: 0, created: 0,
+        message: allEntries.length > 0
+          ? `Nothing to fill — ${allEntries.length} GE/PATHFIT subject${allEntries.length > 1 ? 's are' : ' is'} still waiting on the GE Coordinator, not you.`
+          : 'Nothing is unassigned.',
+      })
+    }
 
     const loadMap = await getCombinedLoadMap(academic_year, semester)
     const holders = (await myPlaceholders(req.user.id)).map(p => ({ ...p, load: loadMap[p.id] || 0 }))
@@ -136,8 +151,8 @@ router.post('/fill', authenticate, authorize('chair'), async (req, res) => {
 })
 
 // ── GET /api/placeholders?year=&semester= ──────────────────────────────────────
-// Each placeholder with the subjects it holds (its "specialty basis") and the
-// real instructors who could take it over, best specialty match first.
+// Each placeholder with the subjects it holds, and the real department
+// instructors who could take it over — least-loaded first.
 router.get('/', authenticate, authorize('chair'), async (req, res) => {
   const { year = '2026-2027', semester = 1 } = req.query
   try {
@@ -155,23 +170,16 @@ router.get('/', authenticate, authorize('chair'), async (req, res) => {
     )
     const loadMap = await getCombinedLoadMap(year, semester)
 
-    const poolDepts = [...new Set(entries.map(e => poolOf(e.course_code)).filter(Boolean))]
     const [cands] = await pool.query(
       `SELECT id, name, department, role, programs FROM users
-       WHERE role IN ('instructor', 'chair', 'dean') AND is_placeholder = 0
-         AND (department = ? ${poolDepts.length ? 'OR department IN (?)' : ''})`,
-      poolDepts.length ? [chair.department, poolDepts] : [chair.department]
+       WHERE role IN ('instructor', 'chair', 'dean') AND is_placeholder = 0 AND department = ?`,
+      [chair.department]
     )
     // Honour "I only teach BSIS": an instructor tagged for other programs isn't offered a BSIT placeholder.
     const candidates = cands.filter(c => {
       const list = String(c.programs || '').split(',').map(norm).filter(Boolean)
       return !list.length || !chair.program || list.includes(norm(chair.program))
     })
-    const [specs] = candidates.length ? await pool.query(
-      `SELECT isp.instructor_id, isp.priority, ps.id AS subject_id, ps.course_code
-       FROM instructor_specialties isp JOIN prospectus_subjects ps ON ps.id = isp.subject_id
-       WHERE isp.instructor_id IN (?)`, [candidates.map(c => c.id)]
-    ) : [[]]
 
     const out = []
     for (const h of holders) {
@@ -188,20 +196,17 @@ router.get('/', authenticate, authorize('chair'), async (req, res) => {
       const suggestions = candidates.map(c => {
         const eligible = mine.filter(e => canTeachEntry(c, chair.department, e))
         if (!eligible.length) return null
-        const matched = subjects.filter(s => specs.some(sp => sp.instructor_id === c.id &&
-          (sp.subject_id === s.subject_id || norm(sp.course_code) === norm(s.course_code))))
         const current = loadMap[c.id] || 0
         const movable = eligible.reduce((a, e) => a + creditOf(e), 0)
         const projected = current + movable
         return {
           id: c.id, name: c.name, department: c.department, role: c.role,
-          matched_subjects: matched.map(s => s.title),
           eligible_entry_ids: eligible.map(e => e.id),
           current_units: current, movable_units: movable, projected_units: projected,
           fits: projected <= MAX_UNITS,
-          exception: projected > TARGET_UNITS || matched.length === 0,
+          exception: projected > TARGET_UNITS,
         }
-      }).filter(Boolean).sort((a, b) => b.matched_subjects.length - a.matched_subjects.length || a.current_units - b.current_units)
+      }).filter(Boolean).sort((a, b) => a.current_units - b.current_units)
 
       out.push({
         id: h.id, name: h.name,
@@ -237,7 +242,7 @@ router.post('/:id/replace', authenticate, authorize('chair'), async (req, res) =
     let chosen = Array.isArray(entry_ids) && entry_ids.length ? held.filter(e => entry_ids.includes(e.id)) : held
     const eligible = chosen.filter(e => canTeachEntry(inst, chair.department, e))
     if (!eligible.length) {
-      return res.status(400).json({ message: `${inst.name} can't take these directly — only ${chair.department} instructors (or the shared GE / PATHFIT / NSTP pools for those subjects) can. Use a teaching request for other departments.` })
+      return res.status(400).json({ message: `${inst.name} can't take these directly — only ${chair.department} instructors can. Use a teaching request for other departments.` })
     }
     const progList = String(inst.programs || '').split(',').map(norm).filter(Boolean)
     if (progList.length && chair.program && !progList.includes(norm(chair.program))) {
@@ -251,17 +256,11 @@ router.post('/:id/replace', authenticate, authorize('chair'), async (req, res) =
       return res.status(400).json({ message: `${inst.name} is at ${load.toFixed(2)} units; taking ${add.toFixed(2)} more would reach ${projected.toFixed(2)}, over the ${MAX_UNITS}-unit cap. Pick fewer subjects to move.` })
     }
 
-    // Specialty basis: does the instructor teach any of the subjects being handed over?
-    const [specRows] = await pool.query(
-      `SELECT ps.id AS subject_id, ps.course_code FROM instructor_specialties isp
-       JOIN prospectus_subjects ps ON ps.id = isp.subject_id WHERE isp.instructor_id = ?`, [inst.id]
-    )
-    const matched = eligible.filter(e => specRows.some(sp => sp.subject_id === e.subject_id || norm(sp.course_code) === norm(e.course_code)))
-    const exception = projected > TARGET_UNITS || matched.length === 0
+    const exception = projected > TARGET_UNITS
     if (exception && (!reason || String(reason).trim().length < 5)) {
       return res.status(400).json({
         needs_reason: true,
-        message: `${projected > TARGET_UNITS ? `This puts ${inst.name} at ${projected.toFixed(2)} units (standard load is ${TARGET_UNITS})` : `${inst.name} hasn't picked any of these subjects as a specialty`}. Add a short reason — it's flagged as an exception to the Dean.`,
+        message: `This puts ${inst.name} at ${projected.toFixed(2)} units (standard load is ${TARGET_UNITS}). Add a short reason — it's flagged as an exception to the Dean.`,
       })
     }
 

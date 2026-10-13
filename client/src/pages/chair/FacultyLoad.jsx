@@ -500,11 +500,11 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
   const [loadingInstr, setLoadingInstr] = useState(false)
   const [saving, setSaving]             = useState(false)
 
-  // When subject changes, fetch instructors sorted by specialty
+  // When subject changes, fetch eligible instructors for it
   const loadInstructors = async (subjectId) => {
     if (!subjectId) {
       const res = await facultyLoadAPI.getAllInstructors(year, semester)
-      setInstructors(res.data.map(i => ({ ...i, has_specialty: false })))
+      setInstructors(res.data)
       return
     }
     setLoadingInstr(true)
@@ -547,16 +547,12 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
     finally { setSaving(false) }
   }
 
-  // GE subjects are assigned centrally by the GE Coordinator — a chair never
-  // picks one directly here, even though the picker endpoint would only ever
-  // return GE instructors for a GE subject anyway.
-  const isGE = /^GE\b/i.test(form.course_code || '')
+  // GE and PATHFIT subjects are assigned centrally by the GE Coordinator — a
+  // chair never picks one directly here, even though the picker endpoint
+  // would only ever return pool instructors for a pool subject anyway.
+  const isCoordPool = /^(GE|PATHFIT)\b/i.test(form.course_code || '')
   const assignedInstructor = instructors.find(i => String(i.id) === String(form.assigned_instructor_id))
-  const specialists  = instructors.filter(i => i.has_specialty && !i.is_ge && !i.is_pathfit && !i.is_nstp)
-  const geInstr      = instructors.filter(i => i.is_ge)
-  const pathfitInstr = instructors.filter(i => i.is_pathfit)
-  const nstpInstr    = instructors.filter(i => i.is_nstp)
-  const others       = instructors.filter(i => !i.has_specialty && !i.is_ge && !i.is_pathfit && !i.is_nstp)
+  const others = [...instructors].sort((a, b) => a.current_units - b.current_units)
 
   const roleTag = (i) => i.role === 'chair' ? ' (Chair)' : i.role === 'dean' ? ' (Dean)' : ''
 
@@ -621,13 +617,13 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
           )}
 
           {/* Instructor */}
-          {isGE ? (
+          {isCoordPool ? (
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Assign Instructor</label>
               <div className="bg-lime-50 border border-lime-200 rounded-xl px-4 py-3 text-sm text-lime-900">
                 {assignedInstructor
                   ? <>🎓 <strong>{assignedInstructor.name}</strong> — assigned by the GE Coordinator.</>
-                  : <>🎓 GE subjects are assigned by the <strong>GE Coordinator</strong>, not here. Save this unassigned — it'll appear in their queue automatically, and you'll be notified once they assign someone.</>}
+                  : <>🎓 GE and PATHFIT subjects are assigned by the <strong>GE Coordinator</strong>, not here. Save this unassigned — it'll appear in their queue automatically, and you'll be notified once they assign someone.</>}
               </div>
             </div>
           ) : (
@@ -640,63 +636,18 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
               onChange={e=>setForm(f=>({...f,assigned_instructor_id:e.target.value}))}
               className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-green-500 bg-white">
               <option value="">— Unassigned —</option>
-              {specialists.length > 0 && (
-                <optgroup label="⭐ Has Specialty (Recommended)">
-                  {specialists.map(i => (
-                    <option key={i.id} value={i.id}>
-                      {i.name} [{i.department}]{roleTag(i)}{i.specialty_priority ? ` · ${i.specialty_priority === 2 ? '2nd' : '1st'} priority` : ''} — {i.current_units} units loaded
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {geInstr.length > 0 && (
-                <optgroup label="🎓 General Education Instructors">
-                  {geInstr.map(i => (
-                    <option key={i.id} value={i.id}>
-                      {i.name} [GE]{roleTag(i)} — {i.current_units} units loaded
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {pathfitInstr.length > 0 && (
-                <optgroup label="🏃 PATHFIT Instructors">
-                  {pathfitInstr.map(i => (
-                    <option key={i.id} value={i.id}>
-                      {i.name} [PATHFIT]{roleTag(i)} — {i.current_units} units loaded
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {nstpInstr.length > 0 && (
-                <optgroup label="🎖️ NSTP Instructors">
-                  {nstpInstr.map(i => (
-                    <option key={i.id} value={i.id}>
-                      {i.name} [NSTP]{roleTag(i)} — {i.current_units} units loaded
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {others.length > 0 && (
-                <optgroup label="Other Instructors">
-                  {others.map(i => (
-                    <option key={i.id} value={i.id}>
-                      {i.name} [{i.department||'—'}]{roleTag(i)} — {i.current_units} units loaded
-                    </option>
-                  ))}
-                </optgroup>
-              )}
+              {others.map(i => (
+                <option key={i.id} value={i.id}>
+                  {i.name} [{i.department||'—'}]{roleTag(i)} — {i.current_units} units loaded
+                </option>
+              ))}
             </select>
             <p className="text-xs text-gray-500 mt-1">
               Need an instructor from another college? Use <strong>Request from another college</strong> below —
               your Dean, their Dean, and their Chair all weigh in before an instructor is asked.
             </p>
-            {specialists.length > 0 && (
-              <p className="text-xs text-green-600 mt-1">
-                ⭐ {specialists.length} instructor{specialists.length>1?'s':''} ha{specialists.length>1?'ve':'s'} selected this subject as their specialty.
-              </p>
-            )}
-            {specialists.length === 0 && form.subject_id && !loadingInstr && (
-              <p className="text-xs text-amber-600 mt-1">No instructor has selected this subject as their specialty yet.</p>
+            {others.length === 0 && form.subject_id && !loadingInstr && (
+              <p className="text-xs text-amber-600 mt-1">No instructor is available in your department yet — use Placeholders to park this on a mock instructor instead.</p>
             )}
           </div>
           )}
@@ -709,7 +660,7 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
               className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
           </div>
 
-          {editEntry && !editEntry.assigned_instructor_id && !isGE && (
+          {editEntry && !editEntry.assigned_instructor_id && !isCoordPool && (
             <CrossCollegeRequestBox entryId={editEntry.id} year={year} semester={semester} onSent={onClose} />
           )}
 
@@ -1305,7 +1256,7 @@ export default function FacultyLoad() {
         academic_year: loadYear, semester: loadSem, clear_existing: clearExisting
       })
       setAutoGenResult(r.data)
-      toast.success(`Generated ${r.data.count} entries — ${r.data.assigned} assigned, ${r.data.unassigned} need manual assignment.`)
+      toast.success(r.data.message || `Generated ${r.data.count} entries.`)
       fetchEntries()
     } catch (err) { toast.error(err.response?.data?.message || 'Auto-generate failed.') }
     finally { setGenerating(false) }
@@ -1339,9 +1290,9 @@ export default function FacultyLoad() {
   }
   const groupedInstructors = Object.values(instructorGroups)
 
-  // Anyone over the hard unit-credit cap — Auto-Generate will assign a
-  // specialist even past the cap rather than leave a subject unassigned, so
-  // this has to be checked before submitting (mirrors the server-side guard).
+  // Anyone over the hard unit-credit cap — a manual assignment or placeholder
+  // swap could still push someone past it, so this has to be checked before
+  // submitting (mirrors the server-side guard).
   const groupCredit = (grp) => {
     // NSTP does not count toward the unit-credit cap.
     const totalCredit = grp.entries.filter(e=>!isNstp(e.course_code)).reduce((a,e)=>a+creditOf(e),0)
@@ -1570,11 +1521,11 @@ export default function FacultyLoad() {
                   <button
                     onClick={() => handleAutoGenerate(false)}
                     disabled={generating || prospectusSubjects.length === 0}
-                    title="Fills only currently-unassigned subjects with newly-eligible specialists — safe to re-run, nothing already assigned is touched or duplicated."
+                    title="Adds any subject from the prospectus not already on this sheet, left unassigned — safe to re-run, nothing already there is touched or duplicated."
                     className="flex items-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-50 text-white font-bold px-4 py-2.5 rounded-xl transition shadow text-sm">
                     {generating
                       ? <><Loader2 className="w-4 h-4 animate-spin"/>Generating...</>
-                      : <><GraduationCap className="w-4 h-4"/>Fill Unassigned Gaps</>}
+                      : <><GraduationCap className="w-4 h-4"/>Add Missing Subjects</>}
                   </button>
                   <button
                     onClick={() => {
@@ -1624,12 +1575,7 @@ export default function FacultyLoad() {
           {/* Auto-gen result banner */}
           {autoGenResult && (
             <div className="mb-4 flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-800">
-              <span>
-                Generated <strong>{autoGenResult.count}</strong> class assignments from the prospectus
-                {autoGenResult.dept && <> for <strong>{autoGenResult.dept}</strong></>}.
-                {' '}<strong className="text-green-700">{autoGenResult.assigned} assigned</strong>
-                {autoGenResult.unassigned > 0 && <>, <span className="text-amber-700 font-semibold">{autoGenResult.unassigned} need manual assignment</span></>}.
-              </span>
+              <span>{autoGenResult.message}</span>
               <button onClick={()=>setAutoGenResult(null)} className="text-green-600 hover:text-green-800 ml-4"><X className="w-4 h-4"/></button>
             </div>
           )}
@@ -1773,7 +1719,7 @@ export default function FacultyLoad() {
               <GraduationCap className="w-12 h-12 mb-3 opacity-30"/>
               <p className="font-semibold text-gray-500 text-base">Ready to generate the Faculty Loading Sheet</p>
               <p className="text-sm mt-1 text-gray-400 max-w-sm text-center">
-                Click <strong className="text-green-700">Auto-Generate Assignments</strong> above — the system will assign instructors from your department based on their selected specialty.
+                Click <strong className="text-green-700">Add Missing Subjects</strong> above to build the roster from your prospectus — every subject comes out unassigned; use Placeholders to park them on a mock instructor, then swap in a real one.
               </p>
             </div>
           ) : (
@@ -1883,7 +1829,7 @@ export default function FacultyLoad() {
                                   {e.descriptive_title}
                                   {!!e.program_mismatch && (
                                     <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800"
-                                      title={`${e.instructor_name} isn't tagged for ${e.subject_program || 'this'} — reassign to a matching instructor, or fix their programs on My Specialty/Manage Users.`}>
+                                      title={`${e.instructor_name} isn't tagged for ${e.subject_program || 'this'} — reassign to a matching instructor, or fix their programs under Manage Users.`}>
                                       ⚠ Wrong program for {e.instructor_name}
                                     </span>
                                   )}

@@ -10,7 +10,7 @@ const nav = [
 export default function GECoordinatorLayout() {
   return (
     <div className="flex min-h-screen bg-gray-100">
-      <Sidebar navItems={nav} roleLabel="GE Coordinator" />
+      <Sidebar navItems={nav} roleLabel="GE / PATHFIT Coordinator" />
       <main className="flex-1 p-8 overflow-y-auto min-h-screen">
         <Outlet />
       </main>

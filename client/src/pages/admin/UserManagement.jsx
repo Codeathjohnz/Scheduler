@@ -16,7 +16,7 @@ const ROLES = [
   { value: 'dean',       label: 'Dean',                icon: Award,          color: 'bg-indigo-100 text-indigo-700' },
   { value: 'chief_cpd',  label: 'Chief Curriculum Planning and Development', icon: Bookmark, color: 'bg-cyan-100 text-cyan-700' },
   { value: 'quality_assurance', label: 'Quality Assurance', icon: BadgeCheck, color: 'bg-teal-100 text-teal-700' },
-  { value: 'ge_coordinator', label: 'GE Coordinator', icon: Leaf, color: 'bg-lime-100 text-lime-700' },
+  { value: 'ge_coordinator', label: 'GE / PATHFIT Coordinator', icon: Leaf, color: 'bg-lime-100 text-lime-700' },
   { value: 'vpaa',       label: 'VPAA',                icon: UserCircle,     color: 'bg-purple-100 text-purple-700' },
   { value: 'instructor', label: 'Instructor',           icon: BookOpen,       color: 'bg-amber-100 text-amber-700' },
   { value: 'student',    label: 'Student',              icon: Users,          color: 'bg-green-100 text-green-700' },
@@ -108,8 +108,7 @@ function InstructorDetailModal({ user, onClose }) {
           ) : specialties.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
               <BookOpen className="w-8 h-8 mx-auto mb-2 opacity-30"/>
-              <p className="text-sm">No specialties selected yet.</p>
-              <p className="text-xs mt-1">The instructor can set these in <strong>My Specialty</strong>.</p>
+              <p className="text-sm">No specialties on record.</p>
             </div>
           ) : (
             <div className="space-y-4">
