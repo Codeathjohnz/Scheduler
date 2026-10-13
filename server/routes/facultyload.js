@@ -463,24 +463,71 @@ router.delete('/:id', authenticate, authorize('chair', 'admin'), async (req, res
   }
 })
 
-const VALID_LOAD_TYPES = new Set(['administrative', 'research', 'extension', 'project'])
+const VALID_LOAD_TYPES = new Set(['administrative', 'research', 'extension', 'project', 'consultation', 'lesson_prep'])
+const HOURS_ONLY_TYPES = new Set(['consultation', 'lesson_prep'])
+const HOURS_ONLY_LABEL = { consultation: 'Consultation', lesson_prep: 'Lesson Preparation' }
+// Same 40-hour weekly cap used when a chair approves an instructor's own
+// load request (routes/loadRequests.js) — a chair adding load directly,
+// including for themselves, must clear the same bar.
+const CONTACT_HRS_MAX = 40
 
-// POST /api/faculty-load/admin-load — also covers research/extension/project load
+// POST /api/faculty-load/admin-load — administrative/research/extension/
+// project (unit credit) or consultation/lesson prep (hours only, no unit
+// credit). A chair adds this directly — for themselves or for an instructor
+// in their department — with no separate approval step, since the chair IS
+// the approver on the instructor-request version of this same thing
+// (routes/loadRequests.js); both paths write to the same faculty_admin_loads
+// table and count the same way everywhere else in the system.
 router.post('/admin-load', authenticate, authorize('chair', 'admin'), async (req, res) => {
-  const { instructor_id, academic_year, semester, description, units, lec_hours, lab_hours, load_type } = req.body
-  if (!description || !String(description).trim()) {
-    return res.status(400).json({ message: 'Title is required.' })
+  const { instructor_id, academic_year, semester, description, units, hours, load_type } = req.body
+  if (!instructor_id || !academic_year || !semester) {
+    return res.status(400).json({ message: 'instructor_id, academic_year and semester are required.' })
   }
-  if (!units || Number(units) <= 0) {
-    return res.status(400).json({ message: 'Unit credit is required.' })
+  if (!VALID_LOAD_TYPES.has(load_type)) {
+    return res.status(400).json({ message: 'Invalid load type.' })
   }
-  const type = VALID_LOAD_TYPES.has(load_type) ? load_type : 'administrative'
+  const isHoursOnly = HOURS_ONLY_TYPES.has(load_type)
+  if (isHoursOnly) {
+    if (!hours || Number(hours) <= 0) return res.status(400).json({ message: 'Hours is required.' })
+  } else {
+    if (!description || !String(description).trim()) return res.status(400).json({ message: 'Title is required.' })
+    if (!units || Number(units) <= 0) return res.status(400).json({ message: 'Unit credit is required.' })
+  }
+  const finalDescription = isHoursOnly ? HOURS_ONLY_LABEL[load_type] : description.trim()
+  const finalUnits = isHoursOnly ? 0 : Number(units)
+  const finalHours = isHoursOnly ? Number(hours) : null
+
   try {
+    if (isHoursOnly) {
+      // Total weekly Contact Hours (teaching + existing hours-only load + this
+      // one) may never exceed the cap — same check as approving a request.
+      const [[teach]] = await pool.query(
+        `SELECT COALESCE(SUM(lec_hours + lab_hours), 0) AS total FROM faculty_load_entries
+         WHERE assigned_instructor_id = ? AND academic_year = ? AND semester = ?`,
+        [instructor_id, academic_year, semester]
+      )
+      const [[existing]] = await pool.query(
+        `SELECT COALESCE(SUM(hours), 0) AS total FROM faculty_admin_loads
+         WHERE instructor_id = ? AND academic_year = ? AND semester = ? AND load_type IN ('consultation', 'lesson_prep')`,
+        [instructor_id, academic_year, semester]
+      )
+      const projected = Number(teach.total) + Number(existing.total) + finalHours
+      if (projected > CONTACT_HRS_MAX) {
+        return res.status(409).json({ message: `This would bring total Contact Hours to ${projected}, over the ${CONTACT_HRS_MAX}-hour maximum.` })
+      }
+    } else {
+      const load = (await getCombinedLoadMap(academic_year, semester))[instructor_id] || 0
+      const projected = load + finalUnits
+      if (projected > MAX_UNITS) {
+        return res.status(409).json({ message: `This would bring total unit credit to ${projected.toFixed(2)}, over the ${MAX_UNITS}-unit cap.` })
+      }
+    }
+
     const [r] = await pool.query(`
-      INSERT INTO faculty_admin_loads (instructor_id, academic_year, semester, description, units, lec_hours, lab_hours, load_type, chair_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [instructor_id, academic_year, semester, description.trim(), units, lec_hours || 0, lab_hours || 0, type, req.user.id])
-    res.status(201).json({ id: r.insertId })
+      INSERT INTO faculty_admin_loads (instructor_id, academic_year, semester, description, units, hours, lec_hours, lab_hours, load_type, chair_id)
+      VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+    `, [instructor_id, academic_year, semester, finalDescription, finalUnits, finalHours, load_type, req.user.id])
+    res.status(201).json({ id: r.insertId, message: 'Added.' })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }

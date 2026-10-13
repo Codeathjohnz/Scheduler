@@ -9,7 +9,7 @@ import PageHeader from '../../components/ui/PageHeader.jsx'
 import {
   Upload, FileSpreadsheet, Trash2, ChevronDown, ChevronUp,
   Loader2, BookOpen, CheckCircle2, X, Plus, Printer,
-  GraduationCap, Users, Edit2, Send, Clock, CheckCircle, Layers, DoorOpen
+  GraduationCap, Users, Edit2, Send, Clock, CheckCircle, Layers, DoorOpen, Briefcase
 } from 'lucide-react'
 
 /* ─── helpers ──────────────────────────────────────────────── */
@@ -742,6 +742,99 @@ function CrossCollegeRequestBox({ entryId, year, semester, onSent }) {
   )
 }
 
+/* ─── Chair adds an Other Load for THEMSELVES — administrative, research,
+   extension, project (unit credit) or consultation / lesson prep (hours
+   only). Goes straight into faculty_admin_loads with no approval step,
+   since the chair is already who'd approve an instructor's own request for
+   this same thing. */
+function MyOtherLoadModal({ year, semester, onClose, onSaved }) {
+  const { user } = useAuth()
+  const [loadType, setLoadType] = useState('administrative')
+  const [description, setDescription] = useState('')
+  const [units, setUnits] = useState('')
+  const [hours, setHours] = useState('')
+  const [saving, setSaving] = useState(false)
+  const isHoursOnly = HOURS_ONLY_TYPES.has(loadType)
+
+  const submit = async () => {
+    if (isHoursOnly) {
+      if (!hours || Number(hours) <= 0) { toast.error('Hours is required.'); return }
+    } else {
+      if (!description.trim()) { toast.error('Title is required.'); return }
+      if (!units || Number(units) <= 0) { toast.error('Unit credit is required.'); return }
+    }
+    setSaving(true)
+    try {
+      const res = await facultyLoadAPI.addAdminLoad({
+        instructor_id: user.id, academic_year: year, semester, load_type: loadType,
+        description: isHoursOnly ? null : description.trim(),
+        units: isHoursOnly ? 0 : Number(units),
+        hours: isHoursOnly ? Number(hours) : null,
+      })
+      toast.success(res.data.message || 'Added.')
+      onSaved?.()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not add this load.', { duration: 6000 })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b bg-green-800 rounded-t-2xl">
+          <p className="text-white font-bold">Add My Other Load</p>
+          <button onClick={onClose} className="text-green-300 hover:text-white"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Load Type</label>
+            <select value={loadType} onChange={e=>setLoadType(e.target.value)}
+              className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-green-500 bg-white">
+              {LOAD_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+            </select>
+          </div>
+
+          {isHoursOnly ? (
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Hours / week <span className="text-red-500">*</span></label>
+              <input type="number" min="0" step="0.5" value={hours} onChange={e=>setHours(e.target.value)}
+                placeholder="e.g. 3"
+                className="w-full max-w-[160px] border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
+              <p className="text-xs text-gray-400 mt-1">Hours only — no title or unit credit, doesn't count toward the 21/27-unit cap.</p>
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Title <span className="text-red-500">*</span></label>
+                <input value={description} onChange={e=>setDescription(e.target.value)}
+                  placeholder="e.g. Program Chairperson, BSIT"
+                  className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Unit Credit <span className="text-red-500">*</span></label>
+                <input type="number" min="0" step="0.5" value={units} onChange={e=>setUnits(e.target.value)}
+                  placeholder="e.g. 3"
+                  className="w-full max-w-[160px] border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
+              </div>
+            </>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={submit} disabled={saving}
+              className="flex-1 flex items-center justify-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-bold py-2.5 rounded-xl transition text-sm">
+              {saving ? <><Loader2 className="w-4 h-4 animate-spin"/>Adding...</> : 'Add'}
+            </button>
+            <button onClick={onClose}
+              className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-xl transition text-sm">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ─── OLD-FORMAT (SCANNED PDF) PREVIEW — fully editable, unlike the
    read-only xlsx/docx preview above. OCR on a scanned prospectus reads
    titles/codes/prerequisites well but Lec/Lab/Units digits are genuinely
@@ -915,6 +1008,7 @@ export default function FacultyLoad() {
   const [savingSections, setSavingSections] = useState(false)
   const [scheduleByEntry, setScheduleByEntry] = useState({})   // { [faculty_entry_id]: [slot, ...] }
   const [showOverloadedOnly, setShowOverloadedOnly] = useState(false)
+  const [showMyLoadModal, setShowMyLoadModal] = useState(false)
 
   /* load prospectuses */
   const fetchProspectuses = async () => {
@@ -1515,6 +1609,13 @@ export default function FacultyLoad() {
                   </span>
                 )}
               </button>
+              {/* Chair adds admin/research/extension/project/consultation/lesson-prep
+                  load for THEMSELVES directly — no separate approval needed, since
+                  the chair is the one who'd approve an instructor's own request anyway. */}
+              <button onClick={()=>setShowMyLoadModal(true)}
+                className="flex items-center gap-2 bg-white hover:bg-gray-50 border-2 border-gray-200 text-gray-700 font-semibold px-4 py-2.5 rounded-xl transition text-sm">
+                <Briefcase className="w-4 h-4"/> My Other Load
+              </button>
               {/* Auto-generate — primary action */}
               {entries.length > 0 ? (
                 <>
@@ -2033,6 +2134,11 @@ export default function FacultyLoad() {
       {showCourseOffering && (
         <CourseOfferingView entries={entries} year={loadYear} semester={loadSem}
           dept={user?.department} onClose={()=>setShowCourseOffering(false)} />
+      )}
+      {showMyLoadModal && (
+        <MyOtherLoadModal year={loadYear} semester={loadSem}
+          onClose={()=>setShowMyLoadModal(false)}
+          onSaved={()=>{ setShowMyLoadModal(false); fetchEntries() }} />
       )}
 
       {/* Assign from Unassigned modal */}
