@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, Fragment } from 'react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 import { prospectusAPI, facultyLoadAPI, submissionsAPI, schedulingAPI, placeholdersAPI, crossDeptAPI, crossDeptChainAPI } from '../../services/api.js'
-import PlaceholdersPanel from './PlaceholdersPanel.jsx'
+import PlaceholdersPanel, { AssignModal } from './PlaceholdersPanel.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import {
@@ -1011,6 +1011,8 @@ export default function FacultyLoad() {
   const [scheduleByEntry, setScheduleByEntry] = useState({})   // { [faculty_entry_id]: [slot, ...] }
   const [showOverloadedOnly, setShowOverloadedOnly] = useState(false)
   const [showMyLoadModal, setShowMyLoadModal] = useState(false)
+  const [assigningPlaceholder, setAssigningPlaceholder] = useState(null)   // the { id, name, subjects, suggestions } of the placeholder card's own "Assign a real instructor" button
+  const [loadingAssignPh, setLoadingAssignPh] = useState(false)
 
   /* load prospectuses */
   const fetchProspectuses = async () => {
@@ -1342,6 +1344,23 @@ export default function FacultyLoad() {
       toast.error(err.response?.data?.message || 'Could not assign placeholders.')
     } finally {
       setFillingPh(false)
+    }
+  }
+
+  // Jump straight to "Assign a real instructor" from the placeholder's own
+  // card header on the Loading Sheet, instead of having to scroll down to
+  // the Placeholders panel to find it.
+  const openAssignForPlaceholder = async (instructorId) => {
+    setLoadingAssignPh(true)
+    try {
+      const r = await placeholdersAPI.list(loadYear, loadSem)
+      const ph = r.data.find(p => p.id === instructorId)
+      if (!ph) { toast.error('Could not find this placeholder.'); return }
+      setAssigningPlaceholder(ph)
+    } catch {
+      toast.error('Failed to load this placeholder.')
+    } finally {
+      setLoadingAssignPh(false)
     }
   }
 
@@ -1901,6 +1920,16 @@ export default function FacultyLoad() {
                             : `${totalCredit.toFixed(2)} credit · ${totalU} units · ${totalLec}L/${totalLab}Lab`}
                           {overMax && ' ⚠ Over max'}
                         </span>
+                        {!isUnassigned && grp.entries[0]?.instructor_is_placeholder && (
+                          <button
+                            onClick={() => openAssignForPlaceholder(grp.instructorId)}
+                            disabled={loadingAssignPh}
+                            title="Replace this placeholder with a real instructor"
+                            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-bold px-3 py-1.5 rounded-full transition"
+                          >
+                            {loadingAssignPh ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Users className="w-3.5 h-3.5" />} Assign a real instructor
+                          </button>
+                        )}
                         {!isUnassigned && (
                           <button
                             onClick={() => setAssignTarget({ instructorId: grp.instructorId, instructorName: grp.name })}
@@ -2149,6 +2178,11 @@ export default function FacultyLoad() {
         <MyOtherLoadModal year={loadYear} semester={loadSem}
           onClose={()=>setShowMyLoadModal(false)}
           onSaved={()=>{ setShowMyLoadModal(false); fetchEntries() }} />
+      )}
+      {assigningPlaceholder && (
+        <AssignModal ph={assigningPlaceholder} year={loadYear} semester={loadSem}
+          onClose={()=>setAssigningPlaceholder(null)}
+          onDone={()=>{ setAssigningPlaceholder(null); fetchEntries(); setPhRefresh(k => k + 1) }} />
       )}
 
       {/* Assign from Unassigned modal */}

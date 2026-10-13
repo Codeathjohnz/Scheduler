@@ -12,7 +12,7 @@ const STATUS = {
 }
 
 /* ── assign dialog ───────────────────────────────────────────────────────── */
-function AssignModal({ ph, year, semester, onClose, onDone }) {
+export function AssignModal({ ph, year, semester, onClose, onDone }) {
   const [pickedId, setPickedId] = useState(ph.suggestions[0]?.id ?? null)
   const [skipped, setSkipped]   = useState(new Set())      // entry ids the chair unticked
   const [reason, setReason]     = useState('')
