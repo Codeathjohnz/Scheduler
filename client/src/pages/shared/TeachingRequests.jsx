@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import toast from 'react-hot-toast'
 import PageHeader from '../../components/ui/PageHeader.jsx'
-import { crossDeptChainAPI, facultyLoadAPI } from '../../services/api.js'
+import { crossDeptChainAPI, crossDeptAPI, facultyLoadAPI } from '../../services/api.js'
 import { useAuth } from '../../context/AuthContext.jsx'
 import { creditOf } from '../../utils/unitCredit.js'
-import { Loader2, Check, X, ArrowRight, Undo2, Inbox } from 'lucide-react'
+import { Loader2, Check, X, ArrowRight, Undo2, Inbox, Send } from 'lucide-react'
 
 const SEM = { 1: '1st Sem', 2: '2nd Sem', 3: 'Summer' }
 
@@ -112,6 +112,124 @@ function AssignInstructor({ r, busy, onAssign }) {
   )
 }
 
+// Pick which of the chair's own unassigned subjects needs an instructor from
+// another college, then start the chain for it — without having to go find
+// that subject in Faculty Load first.
+const CROSS_DEPT_POOL = /^(GE|PATHFIT)\b/i
+function NewRequestModal({ onClose, onSent }) {
+  const [year, setYear] = useState('2026-2027')
+  const [semester, setSemester] = useState(1)
+  const [entries, setEntries] = useState([])
+  const [loadingEntries, setLoadingEntries] = useState(true)
+  const [entryId, setEntryId] = useState('')
+  const [departments, setDepartments] = useState([])
+  const [target, setTarget] = useState('')
+  const [note, setNote] = useState('')
+  const [sending, setSending] = useState(false)
+
+  useEffect(() => {
+    setLoadingEntries(true)
+    Promise.all([facultyLoadAPI.getAll(year, semester), crossDeptAPI.accessDepartments(year, semester)])
+      .then(([e, d]) => {
+        setEntries(e.data.entries.filter(x => !x.assigned_instructor_id && !CROSS_DEPT_POOL.test(x.course_code)))
+        setDepartments(d.data.map(dep => dep.department))
+      })
+      .catch(() => { setEntries([]); setDepartments([]) })
+      .finally(() => setLoadingEntries(false))
+  }, [year, semester])
+
+  const picked = entries.find(e => String(e.id) === String(entryId))
+  useEffect(() => { setNote(picked?.needs_instructor_reason || '') }, [entryId])
+
+  const submit = async () => {
+    if (!entryId) { toast.error('Pick a subject first.'); return }
+    if (!target) { toast.error('Pick a college to ask.'); return }
+    setSending(true)
+    try {
+      const res = await crossDeptChainAPI.create({ entry_id: Number(entryId), target_department: target, note })
+      toast.success(res.data.message || 'Sent to your Dean.')
+      onSent?.()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not send the request.', { duration: 6000 })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b bg-green-800 rounded-t-2xl">
+          <p className="text-white font-bold">Request instructor from another college</p>
+          <button onClick={onClose} className="text-green-300 hover:text-white"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Academic Year</label>
+              <input value={year} onChange={e => setYear(e.target.value)}
+                className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Semester</label>
+              <select value={semester} onChange={e => setSemester(Number(e.target.value))}
+                className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-green-500">
+                {Object.entries(SEM).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">
+              Subject {loadingEntries && <span className="text-gray-400 font-normal">(loading...)</span>}
+            </label>
+            <select value={entryId} onChange={e => setEntryId(e.target.value)}
+              className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-green-500">
+              <option value="">— Pick an unassigned subject —</option>
+              {entries.map(e => (
+                <option key={e.id} value={e.id}>
+                  {e.course_code} — {e.descriptive_title} ({e.program_yr_sec}){e.needs_instructor_reason ? ' ⚠ flagged' : ''}
+                </option>
+              ))}
+            </select>
+            {!loadingEntries && entries.length === 0 && (
+              <p className="text-xs text-gray-400 mt-1">No unassigned subjects for this term — GE/PATHFIT subjects go through the GE Coordinator instead.</p>
+            )}
+          </div>
+
+          {picked && (
+            <>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">College to ask</label>
+                <select value={target} onChange={e => setTarget(e.target.value)}
+                  className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-green-500">
+                  <option value="">— Pick a college —</option>
+                  {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Note</label>
+                <input value={note} onChange={e => setNote(e.target.value)} maxLength={255}
+                  placeholder="Why this college? e.g. only they teach advanced networking"
+                  className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
+              </div>
+            </>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={submit} disabled={sending || !entryId || !target}
+              className="flex-1 flex items-center justify-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-bold py-2.5 rounded-xl transition text-sm">
+              {sending ? <><Loader2 className="w-4 h-4 animate-spin"/>Sending...</> : <><Send className="w-4 h-4"/>Send to my Dean</>}
+            </button>
+            <button onClick={onClose}
+              className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-xl transition text-sm">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function TeachingRequests() {
   const { user } = useAuth()
   const isChair = user.role === 'chair'
@@ -123,6 +241,7 @@ export default function TeachingRequests() {
   const [toAnswer, setToAnswer]   = useState([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId]   = useState(null)
+  const [showNewRequest, setShowNewRequest] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -273,8 +392,14 @@ export default function TeachingRequests() {
       {/* Chair: requests I've sent to my own Dean */}
       {isChair && (
         <section>
-          <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-1">My requests ({openMine.length} open)</h2>
-          <p className="text-xs text-gray-400 mb-3">Start a new one from an unassigned subject in Faculty Load.</p>
+          <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
+            <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide">My requests ({openMine.length} open)</h2>
+            <button onClick={() => setShowNewRequest(true)}
+              className="flex items-center gap-1.5 bg-green-700 hover:bg-green-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg">
+              <Send className="w-3.5 h-3.5" /> Request instructor from another college
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 mb-3">Pick any unassigned subject from your own Faculty Load — or start it directly from that subject's row there instead.</p>
           {mine.length === 0 ? (
             <div className="bg-white rounded-2xl border border-gray-200 py-8 text-center text-sm text-gray-400">You haven't asked another college for an instructor yet.</div>
           ) : (
@@ -302,6 +427,11 @@ export default function TeachingRequests() {
             </div>
           )}
         </section>
+      )}
+
+      {showNewRequest && (
+        <NewRequestModal onClose={() => setShowNewRequest(false)}
+          onSent={() => { setShowNewRequest(false); load() }} />
       )}
     </div>
   )
