@@ -51,7 +51,7 @@ export async function deanOf(department) {
 // an incoming request on behalf of their college.
 export async function chairsOf(department) {
   const [rows] = await pool.query(
-    "SELECT id, name FROM users WHERE department = ? AND role = 'chair' AND is_placeholder = 0",
+    "SELECT id, name, programs FROM users WHERE department = ? AND role = 'chair' AND is_placeholder = 0 ORDER BY name",
     [department]
   )
   return rows

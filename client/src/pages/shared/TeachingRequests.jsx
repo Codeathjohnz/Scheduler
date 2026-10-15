@@ -68,6 +68,45 @@ function Actions({ yes, no, busy, onYes, onNo }) {
   )
 }
 
+// Dean B's picker — a department can run more than one program (CCIS has
+// both BSIT and BSIS, each with its own chair), so approving means naming
+// which specific Program Chair this goes to, not just releasing it into a
+// shared department-wide queue.
+function DeanBApprove({ r, chairs, busy, onApprove, onDecline }) {
+  const [pickId, setPickId] = useState('')
+  const [declining, setDeclining] = useState(false)
+  const [reason, setReason] = useState('')
+
+  if (declining) {
+    return (
+      <div className="flex flex-wrap gap-2 items-center">
+        <input autoFocus value={reason} onChange={e => setReason(e.target.value)} maxLength={255} placeholder="Reason — required, they'll see it"
+          className="flex-1 min-w-[220px] border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-red-400" />
+        <button disabled={busy || !reason.trim()} onClick={() => onDecline(reason)} className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-semibold rounded-xl text-sm">Confirm decline</button>
+        <button onClick={() => setDeclining(false)} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl text-sm">Back</button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2 items-center">
+      <select value={pickId} onChange={e => setPickId(e.target.value)}
+        className="flex-1 min-w-[220px] border-2 border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-green-500">
+        <option value="">— Pick a Program Chair —</option>
+        {chairs.map(c => <option key={c.id} value={c.id}>{c.name}{c.programs ? ` — ${c.programs}` : ''}</option>)}
+      </select>
+      <button disabled={busy || !pickId} onClick={() => onApprove(pickId)}
+        className="flex items-center gap-1.5 px-4 py-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-semibold rounded-xl text-sm">
+        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Approve
+      </button>
+      <button disabled={busy} onClick={() => setDeclining(true)}
+        className="flex items-center gap-1.5 px-4 py-2 bg-white hover:bg-red-50 border-2 border-red-200 text-red-700 font-semibold rounded-xl text-sm">
+        <X className="w-4 h-4" /> Decline
+      </button>
+    </div>
+  )
+}
+
 // Chair B's picker — a willing instructor from their own department, with a
 // live view of the unit load this would add (the server enforces the cap too).
 function AssignInstructor({ r, busy, onAssign }) {
@@ -381,7 +420,7 @@ export default function TeachingRequests() {
   const isDean = user.role === 'dean'
 
   const [mine, setMine]       = useState([])
-  const [deanInbox, setDeanInbox] = useState({ asDeanA: [], asDeanB: [], recent: [] })
+  const [deanInbox, setDeanInbox] = useState({ asDeanA: [], asDeanB: [], asDeanBChairs: [], recent: [] })
   const [toAssign, setToAssign]   = useState([])
   const [toAnswer, setToAnswer]   = useState([])
   const [geMine, setGeMine]   = useState([])
@@ -394,7 +433,7 @@ export default function TeachingRequests() {
     try {
       const [m, d, a, ans, ge] = await Promise.all([
         isChair ? crossDeptChainAPI.mine() : Promise.resolve({ data: [] }),
-        isDean ? crossDeptChainAPI.deanInbox() : Promise.resolve({ data: { asDeanA: [], asDeanB: [], recent: [] } }),
+        isDean ? crossDeptChainAPI.deanInbox() : Promise.resolve({ data: { asDeanA: [], asDeanB: [], asDeanBChairs: [], recent: [] } }),
         isChair ? crossDeptChainAPI.toAssign() : Promise.resolve({ data: [] }),
         crossDeptChainAPI.toAnswer(),
         isChair ? geCoordinatorAPI.mine() : Promise.resolve({ data: [] }),
@@ -464,7 +503,7 @@ export default function TeachingRequests() {
       {isDean && (
         <section>
           <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-1">Requests from other colleges ({deanInbox.asDeanB.length})</h2>
-          <p className="text-xs text-gray-400 mb-3">Another college's Dean already approved this — approving hands it to one of your Program Chairs to pick a willing instructor.</p>
+          <p className="text-xs text-gray-400 mb-3">Another college's Dean already approved this — approving means picking which of your Program Chairs it goes to (your college can run more than one program).</p>
           {deanInbox.asDeanB.length === 0 ? (
             <div className="bg-white rounded-2xl border border-gray-200 py-8 text-center text-sm text-gray-400">Nothing waiting.</div>
           ) : (
@@ -476,9 +515,9 @@ export default function TeachingRequests() {
                     <span className="text-xs text-gray-500"><strong className="text-gray-700">{r.requester_department}</strong> needs an instructor</span>
                   </div>
                   {r.note && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-2">"{r.note}"</p>}
-                  <Actions yes="Approve" no="Decline" busy={busyId === r.id}
-                    onYes={() => run(r.id, () => crossDeptChainAPI.deanBAct(r.id, 'approve'))}
-                    onNo={reason => run(r.id, () => crossDeptChainAPI.deanBAct(r.id, 'decline', reason))} />
+                  <DeanBApprove r={r} chairs={deanInbox.asDeanBChairs} busy={busyId === r.id}
+                    onApprove={chairId => run(r.id, () => crossDeptChainAPI.deanBAct(r.id, 'approve', undefined, chairId))}
+                    onDecline={reason => run(r.id, () => crossDeptChainAPI.deanBAct(r.id, 'decline', reason))} />
                 </Card>
               ))}
             </div>
@@ -490,7 +529,7 @@ export default function TeachingRequests() {
       {isChair && (
         <section>
           <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-1">Assign an instructor ({toAssign.length})</h2>
-          <p className="text-xs text-gray-400 mb-3">Both Deans approved — pick a willing instructor from your department. If they decline, you'll be asked to pick again.</p>
+          <p className="text-xs text-gray-400 mb-3">Both Deans approved and routed this specifically to you — pick a willing instructor from your department. If they decline, you'll be asked to pick again.</p>
           {toAssign.length === 0 ? (
             <div className="bg-white rounded-2xl border border-gray-200 py-8 text-center text-sm text-gray-400">Nothing waiting.</div>
           ) : (

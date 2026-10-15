@@ -14,12 +14,16 @@ import { notify } from '../utils/notify.js'
  * and the instructor's answer climbs back the same way. Nobody skips a link:
  * Chair A never picks the instructor directly (that was the older, simpler
  * flow in crossDept.js/deptAccess.js, left in place but no longer reachable
- * from this UI) — they ask their own Dean, who asks the other college's Dean,
- * who hands it to one of that college's Chairs, who picks a willing
- * instructor from their own department. A decline at the instructor stage
- * only loops back to Chair B (who can simply try someone else) rather than
- * restarting the whole chain — the two Deans already said yes once, and
- * nobody should have to approve the same borrowing twice.
+ * from this UI) — they ask their own Dean, who asks the other college's Dean.
+ * A department can run more than one program (CCIS has both BSIT and BSIS,
+ * each with its own chair), so Dean B doesn't just approve into a shared
+ * department-wide queue — they pick the SPECIFIC Program Chair this should
+ * go to, right as they approve. Only that chair ever sees it; picking a
+ * willing instructor from their own department is their job alone. A
+ * decline at the instructor stage only loops back to that same Chair B
+ * (who can simply try someone else) rather than restarting the whole chain —
+ * the two Deans already said yes once, and nobody should have to approve the
+ * same borrowing twice.
  */
 const router = Router()
 
@@ -122,14 +126,18 @@ router.get('/mine', authenticate, authorize('chair'), async (req, res) => {
 router.get('/dean-inbox', authenticate, authorize('dean'), async (req, res) => {
   try {
     const [[me]] = await pool.query('SELECT department FROM users WHERE id = ?', [req.user.id])
-    if (!me?.department) return res.json({ asDeanA: [], asDeanB: [], recent: [] })
+    if (!me?.department) return res.json({ asDeanA: [], asDeanB: [], asDeanBChairs: [], recent: [] })
     const [asDeanA] = await pool.query(`${BASE} WHERE c.stage = 'pending_dean_a' AND c.requester_department = ? ORDER BY c.id DESC`, [me.department])
     const [asDeanB] = await pool.query(`${BASE} WHERE c.stage = 'pending_dean_b' AND c.target_department = ? ORDER BY c.id DESC`, [me.department])
     const [recent] = await pool.query(
       `${BASE} WHERE (c.requester_department = ? OR c.target_department = ?) AND c.stage NOT IN ('pending_dean_a','pending_dean_b') ORDER BY c.id DESC LIMIT 20`,
       [me.department, me.department]
     )
-    res.json({ asDeanA, asDeanB, recent })
+    // Every chair of this dean's own college — same list regardless of which
+    // asDeanB request it's for, so fetched once rather than per row. The
+    // client picks one when approving.
+    const asDeanBChairs = await chairsOf(me.department)
+    res.json({ asDeanA, asDeanB, asDeanBChairs, recent })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
@@ -171,7 +179,7 @@ router.patch('/:id/dean-a', authenticate, authorize('dean'), async (req, res) =>
 
 // PATCH /api/cross-dept-chain/:id/dean-b — Dean B approves (forwards to that college's Chairs) or declines
 router.patch('/:id/dean-b', authenticate, authorize('dean'), async (req, res) => {
-  const { action, reason } = req.body
+  const { action, reason, chair_b_id } = req.body
   try {
     const r = await loadChain(req.params.id)
     if (!r) return res.status(404).json({ message: 'Request not found.' })
@@ -190,25 +198,28 @@ router.patch('/:id/dean-b', authenticate, authorize('dean'), async (req, res) =>
       return res.json({ message: 'Declined.' })
     }
 
-    const chairs = await chairsOf(r.target_department)
-    if (!chairs.length) return res.status(400).json({ message: `${r.target_department} has no Program Chair account yet. Ask the Admin to add one before approving this.` })
+    if (!chair_b_id) return res.status(400).json({ message: 'Pick which Program Chair this goes to.' })
+    const [[chairB]] = await pool.query(
+      "SELECT id, name FROM users WHERE id = ? AND department = ? AND role = 'chair' AND is_placeholder = 0",
+      [chair_b_id, r.target_department]
+    )
+    if (!chairB) return res.status(400).json({ message: `${r.target_department} has no Program Chair account yet. Ask the Admin to add one before approving this.` })
 
-    await pool.query("UPDATE cross_dept_chain SET stage = 'pending_chair_b', dean_b_at = NOW() WHERE id = ?", [r.id])
-    await log(r.id, 'dean_b_approved', req.user.id, null)
-    await notify(chairs.map(c => c.id), { type: 'cross_dept_chain', link: '/chair/teaching-requests', title: `${r.requester_department} needs one of your instructors for ${label(r)}`, body: r.note || `Approved by your Dean — pick a willing instructor.` })
-    await notify([r.requested_by], { type: 'cross_dept_chain_result', link: '/chair/teaching-requests', title: `${r.target_department}'s Dean approved — now with their Program Chair`, body: null })
-    res.json({ message: `Approved — sent to ${r.target_department}'s Program Chair.` })
+    await pool.query("UPDATE cross_dept_chain SET stage = 'pending_chair_b', chair_b_id = ?, dean_b_at = NOW() WHERE id = ?", [chairB.id, r.id])
+    await log(r.id, 'dean_b_approved', req.user.id, `assigned to ${chairB.name}`)
+    await notify([chairB.id], { type: 'cross_dept_chain', link: '/chair/teaching-requests', title: `${r.requester_department} needs one of your instructors for ${label(r)}`, body: r.note || `Approved by your Dean — pick a willing instructor.` })
+    await notify([r.requested_by], { type: 'cross_dept_chain_result', link: '/chair/teaching-requests', title: `${r.target_department}'s Dean approved — now with ${chairB.name}`, body: null })
+    res.json({ message: `Approved — sent to ${chairB.name}.` })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
 })
 
-// GET /api/cross-dept-chain/to-assign — Chair B's queue: requests waiting for them to pick an instructor
+// GET /api/cross-dept-chain/to-assign — Chair B's queue: requests the Dean
+// specifically routed to THIS chair (not every chair of the department).
 router.get('/to-assign', authenticate, authorize('chair'), async (req, res) => {
   try {
-    const [[me]] = await pool.query('SELECT department FROM users WHERE id = ?', [req.user.id])
-    if (!me?.department) return res.json([])
-    const [rows] = await pool.query(`${BASE} WHERE c.stage = 'pending_chair_b' AND c.target_department = ? ORDER BY c.id DESC`, [me.department])
+    const [rows] = await pool.query(`${BASE} WHERE c.stage = 'pending_chair_b' AND c.chair_b_id = ? ORDER BY c.id DESC`, [req.user.id])
     res.json(rows)
   } catch (err) {
     res.status(500).json({ message: err.message })
@@ -223,7 +234,7 @@ router.patch('/:id/assign', authenticate, authorize('chair'), async (req, res) =
     const r = await loadChain(req.params.id)
     if (!r) return res.status(404).json({ message: 'Request not found.' })
     const [[me]] = await pool.query('SELECT name, department FROM users WHERE id = ?', [req.user.id])
-    if (me?.department !== r.target_department) return res.status(403).json({ message: `Only a ${r.target_department} Program Chair can assign this.` })
+    if (r.chair_b_id !== req.user.id) return res.status(403).json({ message: `${r.target_department}'s Dean routed this to a different Program Chair.` })
     if (r.stage !== 'pending_chair_b') return res.status(409).json({ message: 'This request is not waiting on you right now.' })
 
     const [[inst]] = await pool.query(
@@ -239,8 +250,8 @@ router.patch('/:id/assign', authenticate, authorize('chair'), async (req, res) =
     }
 
     await pool.query(
-      "UPDATE cross_dept_chain SET stage = 'pending_instructor', chair_b_id = ?, instructor_id = ?, chair_b_at = NOW() WHERE id = ?",
-      [req.user.id, inst.id, r.id]
+      "UPDATE cross_dept_chain SET stage = 'pending_instructor', instructor_id = ?, chair_b_at = NOW() WHERE id = ?",
+      [inst.id, r.id]
     )
     await log(r.id, 'instructor_asked', req.user.id, note)
     await notify([inst.id], {
@@ -355,8 +366,8 @@ router.get('/counts', authenticate, async (req, res) => {
       )
       n += c.n
     }
-    if (req.user.role === 'chair' && me?.department) {
-      const [[c]] = await pool.query(`SELECT COUNT(*) AS n FROM cross_dept_chain WHERE stage = 'pending_chair_b' AND target_department = ?`, [me.department])
+    if (req.user.role === 'chair') {
+      const [[c]] = await pool.query(`SELECT COUNT(*) AS n FROM cross_dept_chain WHERE stage = 'pending_chair_b' AND chair_b_id = ?`, [req.user.id])
       n += c.n
     }
     if (['instructor', 'chair', 'dean'].includes(req.user.role)) {
