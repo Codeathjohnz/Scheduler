@@ -483,6 +483,28 @@ const steps = [
       return true
     },
   },
+  // The account above only gets ONE chance at a password: on the deploy that
+  // first creates it. If that random one was never retrieved from the log
+  // in time, there was no way back in except an admin manually resetting it
+  // under Manage Users. This keeps the account's password permanently in
+  // sync with GE_COORDINATOR_PASSWORD whenever that's set in the
+  // environment — set it in Dokploy and redeploy to reset (or just set) the
+  // password to something known, as many times as needed. No password is
+  // ever written to source; this only ever reads it from the environment.
+  {
+    name: "sync 'ge_coordinator' password from GE_COORDINATOR_PASSWORD",
+    async run(pool) {
+      if (!process.env.GE_COORDINATOR_PASSWORD) return false
+      const hash = await bcrypt.hash(process.env.GE_COORDINATOR_PASSWORD, 10)
+      const [result] = await pool.query(
+        "UPDATE users SET password_hash = ? WHERE username = 'ge_coordinator' AND role = 'ge_coordinator'",
+        [hash]
+      )
+      if (!result.affectedRows) return false
+      console.log(`[migrate] synced the 'ge_coordinator' account's password from GE_COORDINATOR_PASSWORD`)
+      return true
+    },
+  },
   // GE/PATHFIT subjects are now assigned centrally by the GE Coordinator and
   // never land on a chair's placeholder ("Instructor A") going forward — but
   // a chair could have already parked one there with "Fill Placeholders"
