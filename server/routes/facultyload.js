@@ -334,8 +334,10 @@ router.get('/instructors/:subjectId', authenticate, authorize('chair', 'admin'),
   }
 })
 
-// GET /api/faculty-load/instructors-all — all instructors with current load
-router.get('/instructors-all', authenticate, authorize('chair', 'admin'), async (req, res) => {
+// GET /api/faculty-load/instructors-all — all instructors with current load.
+// Also used by the GE Coordinator dashboard to show GE/PATHFIT instructors'
+// current loads when picking who to assign.
+router.get('/instructors-all', authenticate, authorize('chair', 'admin', 'ge_coordinator'), async (req, res) => {
   const { year = '2026-2027', semester = 1 } = req.query
   try {
     const loadMap = await getCombinedLoadMap(year, semester)
