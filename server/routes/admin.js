@@ -45,7 +45,7 @@ router.get('/stats', authenticate, authorize('admin'), async (req, res) => {
         COALESCE(CONCAT(r.building,' ',r.room_number), 'Online Class') AS room_name,
         r.room_type,
         fle.course_code, fle.program_yr_sec,
-        u.name AS instructor_name, u.id AS instructor_id
+        u.name AS instructor_name, u.id AS instructor_id, u.is_placeholder AS instructor_is_placeholder
       FROM generated_schedules gs
       JOIN faculty_load_entries fle ON gs.faculty_entry_id = fle.id
       LEFT JOIN rooms r ON gs.room_id = r.id

@@ -17,7 +17,7 @@ router.get('/', authenticate, async (req, res) => {
         COALESCE(CONCAT(r.building, ' ', r.room_number), 'Online Class') AS room_name,
         fle.course_code, fle.descriptive_title, fle.units,
         fle.lec_hours, fle.lab_hours, fle.program_yr_sec,
-        u.name AS instructor_name, u.id AS instructor_id,
+        u.name AS instructor_name, u.id AS instructor_id, u.is_placeholder AS instructor_is_placeholder,
         chair.department AS dept
       FROM generated_schedules gs
       JOIN faculty_load_entries fle ON gs.faculty_entry_id = fle.id
@@ -191,7 +191,7 @@ router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
     const [others] = await pool.query(`
       SELECT gs.*, r.building, r.room_number,
         COALESCE(CONCAT(r.building,' ',r.room_number), 'Online Class') AS room_name,
-        fle.assigned_instructor_id AS instructor_id, u.name AS instructor_name,
+        fle.assigned_instructor_id AS instructor_id, u.name AS instructor_name, u.is_placeholder AS instructor_is_placeholder,
         fle.program_yr_sec
       FROM generated_schedules gs
       JOIN faculty_load_entries fle ON gs.faculty_entry_id = fle.id
@@ -235,7 +235,9 @@ router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
       const overlaps = newStart < oEnd && newEnd > oStart
       if (!overlaps) continue
       if (o.room_id === Number(room_id)) conflicts.push(`Room ${o.room_name} is already in use`)
-      if (o.instructor_id && o.instructor_id === self.instructor_id) conflicts.push(`Instructor already has a class at this time`)
+      // A placeholder ("Instructor A") is a shared "needs a real instructor"
+      // bucket, not one real person, so it can never really be double-booked.
+      if (o.instructor_id && o.instructor_id === self.instructor_id && !o.instructor_is_placeholder) conflicts.push(`Instructor already has a class at this time`)
       if (o.program_yr_sec && o.program_yr_sec === self.program_yr_sec) conflicts.push(`Section ${o.program_yr_sec} already has a class at this time`)
     }
 

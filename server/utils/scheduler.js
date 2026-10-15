@@ -379,7 +379,15 @@ export function buildSessions(entries, rooms, mobilityMap, buildingPriorities) {
       const roomType = isPathfit(entry.course_code) ? 'Gym' : g.roomType
       sessions.push({
         entryId:        entry.id,
-        instructorId:   entry.assigned_instructor_id || null,
+        // A placeholder ("Instructor A") is a shared "needs a real instructor"
+        // bucket, not one real person — every subject still waiting on a real
+        // assignment can point at the same placeholder row. Treating that
+        // shared id as a real instructor would make the no-double-booking
+        // constraint (and NoOverlap in the OR-Tools model, which keys off
+        // this same field) falsely forbid two different sections from ever
+        // meeting at the same time just because neither has a real teacher
+        // yet. Null here means "nobody to conflict over."
+        instructorId:   entry.is_placeholder ? null : (entry.assigned_instructor_id || null),
         instructorName: entry.instructor_name || '—',
         programYrSec:   entry.program_yr_sec || '',
         courseCode:     entry.course_code,
@@ -1105,7 +1113,11 @@ export function detectConflicts(rows) {
           message: `Room conflict: ${a.room_name} used by "${a.course_code}" and "${b.course_code}" at the same time`,
         })
       }
-      if (a.instructor_id && a.instructor_id === b.instructor_id) {
+      // A placeholder ("Instructor A") is a shared "needs a real instructor"
+      // bucket, not one real person — many different still-unassigned
+      // sections legitimately share that same row, so it can never actually
+      // be double-booked.
+      if (a.instructor_id && a.instructor_id === b.instructor_id && !a.instructor_is_placeholder) {
         conflicts.push({
           type: 'instructor', ids: [a.id, b.id],
           message: `Instructor conflict: ${a.instructor_name} assigned to "${a.course_code}" and "${b.course_code}" at the same time`,
