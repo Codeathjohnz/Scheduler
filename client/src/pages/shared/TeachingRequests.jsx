@@ -267,6 +267,114 @@ function NewRequestModal({ onClose, onSent }) {
   )
 }
 
+// Same concept as requesting another college, minus the Dean-to-Dean hop —
+// there's only one recipient, the GE Coordinator, so it's a single step:
+// pick one or more GE/PATHFIT subjects and send. Nothing is assigned yet;
+// this just puts them in front of the Coordinator.
+const GE_PATHFIT_POOL = /^(GE|PATHFIT)\b/i
+function GERequestModal({ onClose, onSent }) {
+  const [year, setYear] = useState('2026-2027')
+  const [semester, setSemester] = useState(1)
+  const [entries, setEntries] = useState([])
+  const [loadingEntries, setLoadingEntries] = useState(true)
+  const [selected, setSelected] = useState(new Set())
+  const [sending, setSending] = useState(false)
+
+  useEffect(() => {
+    setLoadingEntries(true)
+    setSelected(new Set())
+    facultyLoadAPI.getAll(year, semester)
+      .then(r => setEntries(r.data.entries.filter(x =>
+        !x.assigned_instructor_id && !x.ge_requested_at && GE_PATHFIT_POOL.test(x.course_code)
+      )))
+      .catch(() => setEntries([]))
+      .finally(() => setLoadingEntries(false))
+  }, [year, semester])
+
+  const toggle = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const submit = async () => {
+    if (selected.size === 0) { toast.error('Pick at least one subject.'); return }
+    setSending(true)
+    try {
+      const res = await geCoordinatorAPI.request([...selected])
+      toast.success(res.data.message || 'Requested.', { duration: 6000 })
+      onSent?.()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not send the request.', { duration: 6000 })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b bg-lime-700 rounded-t-2xl">
+          <p className="text-white font-bold">Request GE/PATHFIT instructor</p>
+          <button onClick={onClose} className="text-lime-200 hover:text-white"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Academic Year</label>
+              <input value={year} onChange={e => setYear(e.target.value)}
+                className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-lime-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Semester</label>
+              <select value={semester} onChange={e => setSemester(Number(e.target.value))}
+                className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-lime-500">
+                {Object.entries(SEM).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">
+              Subjects {loadingEntries && <span className="text-gray-400 font-normal">(loading...)</span>}
+              {selected.size > 0 && <span className="text-lime-700 font-normal"> · {selected.size} selected</span>}
+            </label>
+            {!loadingEntries && entries.length === 0 ? (
+              <p className="text-xs text-gray-400 mt-1">Nothing eligible for this term — every GE/PATHFIT subject is already requested or assigned.</p>
+            ) : (
+              <div className="border-2 border-gray-200 rounded-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
+                {entries.map(e => (
+                  <label key={e.id} className="flex items-start gap-2.5 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50">
+                    <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggle(e.id)}
+                      className="mt-0.5 accent-lime-700" />
+                    <span className="min-w-0">
+                      <span className="font-mono font-semibold text-green-800">{e.course_code}</span> — {e.descriptive_title} <span className="text-gray-500">({e.program_yr_sec})</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={submit} disabled={sending || selected.size === 0}
+              className="flex-1 flex items-center justify-center gap-2 bg-lime-700 hover:bg-lime-800 disabled:opacity-60 text-white font-bold py-2.5 rounded-xl transition text-sm">
+              {sending
+                ? <><Loader2 className="w-4 h-4 animate-spin"/>Sending...</>
+                : <><Send className="w-4 h-4"/>Request {selected.size > 1 ? `${selected.size} subjects` : ''}</>}
+            </button>
+            <button onClick={onClose}
+              className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-xl transition text-sm">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function TeachingRequests() {
   const { user } = useAuth()
   const isChair = user.role === 'chair'
@@ -280,6 +388,7 @@ export default function TeachingRequests() {
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId]   = useState(null)
   const [showNewRequest, setShowNewRequest] = useState(false)
+  const [showGeRequest, setShowGeRequest] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -468,30 +577,44 @@ export default function TeachingRequests() {
         </section>
       )}
 
-      {/* Chair: GE/PATHFIT subjects waiting on the GE Coordinator — nothing
-          to do here but see it's noticed; no request was ever sent, it
-          showed up the moment the subject was saved unassigned. */}
-      {isChair && geMine.length > 0 && (
+      {/* Chair: request a GE/PATHFIT instructor, and see what's still
+          waiting on the Coordinator to assign one. */}
+      {isChair && (
         <section>
-          <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-1">Waiting on the GE Coordinator ({geMine.length})</h2>
-          <p className="text-xs text-gray-400 mb-3">GE and PATHFIT subjects are assigned centrally — no request to send, this is just so it's not invisible while you wait.</p>
-          <div className="space-y-2">
-            {geMine.map(r => (
-              <div key={r.id} className="bg-white rounded-xl border border-gray-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm text-gray-800"><span className="font-mono font-semibold text-green-800">{r.course_code}</span> {r.descriptive_title} <span className="text-gray-500">{r.program_yr_sec}</span></p>
-                  <p className="text-xs text-gray-400 mt-0.5">{SEM[r.semester]} A.Y. {r.academic_year}</p>
-                </div>
-                <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${r.pool === 'PATHFIT' ? 'bg-sky-100 text-sky-800' : 'bg-lime-100 text-lime-800'}`}>{r.pool}</span>
-              </div>
-            ))}
+          <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
+            <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide">Waiting on the GE Coordinator ({geMine.length})</h2>
+            <button onClick={() => setShowGeRequest(true)}
+              className="flex items-center gap-1.5 bg-lime-700 hover:bg-lime-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg">
+              <Send className="w-3.5 h-3.5" /> Request GE/PATHFIT instructor
+            </button>
           </div>
+          <p className="text-xs text-gray-400 mb-3">Pick any unassigned GE or PATHFIT subject from your own Faculty Load — the Coordinator only sees it once you've sent this.</p>
+          {geMine.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-gray-200 py-8 text-center text-sm text-gray-400">Nothing requested yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {geMine.map(r => (
+                <div key={r.id} className="bg-white rounded-xl border border-gray-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm text-gray-800"><span className="font-mono font-semibold text-green-800">{r.course_code}</span> {r.descriptive_title} <span className="text-gray-500">{r.program_yr_sec}</span></p>
+                    <p className="text-xs text-gray-400 mt-0.5">{SEM[r.semester]} A.Y. {r.academic_year}</p>
+                  </div>
+                  <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${r.pool === 'PATHFIT' ? 'bg-sky-100 text-sky-800' : 'bg-lime-100 text-lime-800'}`}>{r.pool}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
       {showNewRequest && (
         <NewRequestModal onClose={() => setShowNewRequest(false)}
           onSent={() => { setShowNewRequest(false); load() }} />
+      )}
+
+      {showGeRequest && (
+        <GERequestModal onClose={() => setShowGeRequest(false)}
+          onSent={() => { setShowGeRequest(false); load() }} />
       )}
     </div>
   )

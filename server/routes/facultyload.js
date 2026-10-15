@@ -370,7 +370,7 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
       return res.status(400).json({ message: `${cross.name} is from ${cross.department} — to borrow them, ask your Dean under Teaching Requests → Request an Instructor. Leave this subject unassigned for now.` })
     }
     if (assigned_instructor_id && req.user.role === 'chair' && coordinatorPool(subject.course_code)) {
-      return res.status(400).json({ message: `${coordinatorPool(subject.course_code)} subjects are assigned by the GE Coordinator, not picked here. Save this unassigned — it will appear in their queue automatically.` })
+      return res.status(400).json({ message: `${coordinatorPool(subject.course_code)} subjects are assigned by the GE Coordinator, not picked here. Save this unassigned, then request an instructor for it under Teaching Requests.` })
     }
     if (assigned_instructor_id) {
       const problem = await programMismatchProblem(assigned_instructor_id, subject_id)
@@ -421,7 +421,7 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
         return res.status(400).json({ message: `${cross.name} is from ${cross.department} — to borrow them, ask your Dean under Teaching Requests → Request an Instructor. Leave this subject unassigned for now.` })
       }
       if (assigned_instructor_id && req.user.role === 'chair' && coordinatorPool(effectiveCourseCode)) {
-        return res.status(400).json({ message: `${coordinatorPool(effectiveCourseCode)} subjects are assigned by the GE Coordinator, not picked here. Leave this unassigned — it will appear in their queue automatically.` })
+        return res.status(400).json({ message: `${coordinatorPool(effectiveCourseCode)} subjects are assigned by the GE Coordinator, not picked here. Leave this unassigned, then request an instructor for it under Teaching Requests.` })
       }
       if (assigned_instructor_id) {
         const problem = await programMismatchProblem(assigned_instructor_id, subject_id || before.subject_id)
@@ -671,7 +671,7 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
     res.json({
       count: rows.length + alreadyPresentCount,
       assigned: alreadyPresentCount, unassigned: rows.length,
-      message: `${rows.length} subject${rows.length === 1 ? '' : 's'} added, all unassigned. Major subjects: use Placeholders to park them on a mock instructor, then swap in a real one. GE/PATHFIT: the GE Coordinator will assign them.`,
+      message: `${rows.length} subject${rows.length === 1 ? '' : 's'} added, all unassigned. Major subjects: use Placeholders to park them on a mock instructor, then swap in a real one. GE/PATHFIT: request an instructor for them under Teaching Requests.`,
     })
   } catch (err) {
     res.status(500).json({ message: err.message })

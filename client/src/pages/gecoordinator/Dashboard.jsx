@@ -126,7 +126,7 @@ export default function GECoordinatorDashboard() {
     <div>
       <PageHeader
         title={`Welcome, ${user?.name}`}
-        subtitle="Assign a GE or PATHFIT instructor to every college's subjects. A chair adds the subject and section; you pick who teaches it."
+        subtitle="Assign a GE or PATHFIT instructor to whichever subjects a chair has requested one for. A chair adds the subject and sends the request; you pick who teaches it."
       />
       <NotificationBox />
 
@@ -162,7 +162,7 @@ export default function GECoordinatorDashboard() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-        <StatCard label="Unassigned Subjects" value={String(filteredQueue.length)} icon={Inbox} color="gold" />
+        <StatCard label="Pending Requests" value={String(filteredQueue.length)} icon={Inbox} color="gold" />
         <StatCard label="Colleges Waiting"    value={String(allColleges.length)} icon={Users} color="teal" />
         <StatCard label="GE/PATHFIT Instructors" value={String(instructors.length)} icon={CheckCircle2} color="green" />
       </div>
@@ -172,7 +172,7 @@ export default function GECoordinatorDashboard() {
       ) : queue.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-200 flex flex-col items-center py-14 text-gray-400">
           <CheckCircle2 className="w-8 h-8 mb-2 opacity-40" />
-          <p className="text-sm">Every college's GE and PATHFIT subjects for this term are assigned.</p>
+          <p className="text-sm">No pending requests for this term — nothing's been asked for yet, or everything already has an instructor.</p>
         </div>
       ) : filteredQueue.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-200 flex flex-col items-center py-14 text-gray-400">

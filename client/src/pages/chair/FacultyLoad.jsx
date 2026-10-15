@@ -623,7 +623,9 @@ function AddEntryModal({ year, semester, prospectusSubjects, onSave, onClose, ed
               <div className="bg-lime-50 border border-lime-200 rounded-xl px-4 py-3 text-sm text-lime-900">
                 {assignedInstructor
                   ? <>🎓 <strong>{assignedInstructor.name}</strong> — assigned by the GE Coordinator.</>
-                  : <>🎓 GE and PATHFIT subjects are assigned by the <strong>GE Coordinator</strong>, not here. Save this unassigned — it'll appear in their queue automatically, and you'll be notified once they assign someone.</>}
+                  : editEntry?.ge_requested_at
+                    ? <>🎓 Requested — waiting on the <strong>GE Coordinator</strong> to assign someone.</>
+                    : <>🎓 GE and PATHFIT subjects are assigned by the <strong>GE Coordinator</strong>, not here. Save this unassigned, then use <strong>Request GE/PATHFIT instructor</strong> under Teaching Requests to ask them.</>}
               </div>
             </div>
           ) : (

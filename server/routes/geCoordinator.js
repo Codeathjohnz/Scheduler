@@ -11,14 +11,20 @@ import { notify } from '../utils/notify.js'
  * separately drawing from a shared pool (risking two colleges independently
  * overloading the same GE or PATHFIT instructor on the same day), one
  * coordinator account assigns every college's GE and PATHFIT subjects
- * centrally. A chair still adds the subject to their own course offering
- * (section, room — only they know their own schedule), just never picks who
- * teaches it; it appears here, unassigned, the moment they save it, and this
- * assignment is what then shows up back on their Faculty Load page.
+ * centrally.
+ *
+ * Same concept as borrowing from another college, minus the Dean-to-Dean
+ * hop — there's only one recipient, so it's one step: a chair adds the
+ * subject to their own course offering (section, room — only they know
+ * their own schedule), then sends an explicit request for it (PATCH
+ * /request). Only requested subjects ever reach the Coordinator's queue;
+ * saving it unassigned alone isn't enough, same as it isn't for the
+ * cross-department chain. The assignment that follows is what then shows up
+ * back on the chair's Faculty Load page.
  */
 const router = Router()
 
-// GET /api/ge-coordinator/queue?year=&semester= — every college's unassigned GE/PATHFIT subjects
+// GET /api/ge-coordinator/queue?year=&semester= — every college's requested, still-unassigned GE/PATHFIT subjects
 router.get('/queue', authenticate, authorize('ge_coordinator', 'admin'), async (req, res) => {
   const { year = '2026-2027', semester = 1 } = req.query
   try {
@@ -30,7 +36,8 @@ router.get('/queue', authenticate, authorize('ge_coordinator', 'admin'), async (
       LEFT JOIN prospectus_subjects ps ON ps.id = fle.subject_id
       LEFT JOIN prospectus p ON p.id = ps.prospectus_id
       WHERE fle.academic_year = ? AND fle.semester = ? AND fle.assigned_instructor_id IS NULL
-      ORDER BY chairUser.department, fle.program_yr_sec
+        AND fle.ge_requested_at IS NOT NULL
+      ORDER BY fle.ge_requested_at, chairUser.department, fle.program_yr_sec
     `, [year, semester])
     res.json(rows.filter(r => coordinatorPool(r.course_code)).map(r => ({ ...r, pool: coordinatorPool(r.course_code) })))
   } catch (err) {
@@ -38,14 +45,50 @@ router.get('/queue', authenticate, authorize('ge_coordinator', 'admin'), async (
   }
 })
 
-// GET /api/ge-coordinator/mine — a chair's own GE/PATHFIT subjects still
-// waiting on the Coordinator, across every term — there's nothing for the
-// chair to do here but see it's noticed; no request to send, it already
-// showed up the moment they saved the subject unassigned.
+// PATCH /api/ge-coordinator/request — a chair asks the GE Coordinator for one
+// or more subjects at once (e.g. 3 sections nobody in the department can
+// cover). Nothing here picks an instructor — it just puts the subject in
+// front of the Coordinator, same as the first step of the cross-department
+// chain puts a request in front of a Dean.
+router.patch('/request', authenticate, authorize('chair'), async (req, res) => {
+  const { entry_ids } = req.body
+  if (!Array.isArray(entry_ids) || !entry_ids.length) {
+    return res.status(400).json({ message: 'entry_ids is required.' })
+  }
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, course_code, program_yr_sec FROM faculty_load_entries
+       WHERE id IN (?) AND chair_id = ? AND assigned_instructor_id IS NULL AND ge_requested_at IS NULL`,
+      [entry_ids, req.user.id]
+    )
+    const eligible = rows.filter(r => coordinatorPool(r.course_code))
+    if (!eligible.length) {
+      return res.status(400).json({ message: 'Nothing eligible to request — already requested, already assigned, or not a GE/PATHFIT subject.' })
+    }
+    const ids = eligible.map(r => r.id)
+    await pool.query('UPDATE faculty_load_entries SET ge_requested_at = NOW() WHERE id IN (?)', [ids])
+
+    const [coordinators] = await pool.query("SELECT id FROM users WHERE role = 'ge_coordinator'")
+    const [[me]] = await pool.query('SELECT name FROM users WHERE id = ?', [req.user.id])
+    await notify(coordinators.map(c => c.id), {
+      type: 'ge_requested', link: '/ge-coordinator',
+      title: `${me.name} needs ${ids.length > 1 ? `${ids.length} instructors` : 'an instructor'} (${eligible.map(r => r.course_code).join(', ')})`,
+      body: eligible.map(r => `${r.course_code} ${r.program_yr_sec || ''}`.trim()).join('; '),
+    })
+    res.json({ message: `Requested ${ids.length} subject${ids.length > 1 ? 's' : ''} — the GE Coordinator has been notified.`, requested: ids.length })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+// GET /api/ge-coordinator/mine — a chair's own GE/PATHFIT requests still
+// waiting on the Coordinator to assign, across every term.
 router.get('/mine', authenticate, authorize('chair'), async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT * FROM faculty_load_entries WHERE chair_id = ? AND assigned_instructor_id IS NULL ORDER BY academic_year DESC, semester, id`,
+      `SELECT * FROM faculty_load_entries
+       WHERE chair_id = ? AND assigned_instructor_id IS NULL AND ge_requested_at IS NOT NULL
+       ORDER BY academic_year DESC, semester, id`,
       [req.user.id]
     )
     res.json(rows.filter(r => coordinatorPool(r.course_code)).map(r => ({ ...r, pool: coordinatorPool(r.course_code) })))

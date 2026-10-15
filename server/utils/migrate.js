@@ -558,6 +558,19 @@ const steps = [
       return true
     },
   },
+  // GE/PATHFIT assignment used to be fully automatic — unassigned was enough
+  // to show up in the GE Coordinator's queue. Now it works the same way as
+  // asking another college: the chair sends an explicit request first (see
+  // routes/geCoordinator.js PATCH /request), and only requested subjects
+  // ever reach the Coordinator's queue.
+  {
+    name: 'faculty_load_entries.ge_requested_at',
+    async run(pool) {
+      if (await columnInfo(pool, 'faculty_load_entries', 'ge_requested_at')) return false
+      await pool.query('ALTER TABLE faculty_load_entries ADD COLUMN ge_requested_at TIMESTAMP NULL DEFAULT NULL')
+      return true
+    },
+  },
 ]
 
 export async function runMigrations(pool) {

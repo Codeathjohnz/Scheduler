@@ -108,6 +108,7 @@ export const crossDeptChainAPI = {
 // See server/routes/geCoordinator.js.
 export const geCoordinatorAPI = {
   queue:    (year, sem)              => api.get(`/ge-coordinator/queue?year=${year}&semester=${sem}`),
+  request:  (entry_ids)              => api.patch('/ge-coordinator/request', { entry_ids }),
   mine:     ()                       => api.get('/ge-coordinator/mine'),
   assigned: (year, sem)              => api.get(`/ge-coordinator/assigned?year=${year}&semester=${sem}`),
   assign:   (entryId, instructor_id) => api.patch(`/ge-coordinator/${entryId}/assign`, { instructor_id }),
