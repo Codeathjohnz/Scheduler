@@ -577,6 +577,15 @@ export default function ScheduleGenerator() {
             <>
               <p className="font-semibold text-gray-500 text-base">This term has been published.</p>
               <p className="text-sm mt-1">Its schedule is final and recorded in <strong className="text-green-700">Transaction History</strong>.</p>
+              {conflicts.length > 0 ? (
+                <p className="text-xs mt-3 font-semibold text-red-600 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5"/> {conflicts.length} conflict{conflicts.length > 1 ? 's' : ''} detected — see the list above.
+                </p>
+              ) : (
+                <p className="text-xs mt-3 font-semibold text-green-700 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5"/> No conflicts detected in the published schedule.
+                </p>
+              )}
             </>
           ) : (
             <>
