@@ -6,13 +6,12 @@ import NotificationBox from '../../components/common/NotificationBox.jsx'
 import { geCoordinatorAPI, facultyLoadAPI } from '../../services/api.js'
 import { creditOf } from '../../utils/unitCredit.js'
 import { useAuth } from '../../context/AuthContext.jsx'
-import { Loader2, Check, ArrowRight, Users, Inbox, CheckCircle2 } from 'lucide-react'
+import { Loader2, Check, CheckCheck, ArrowRight, Users, Inbox, CheckCircle2 } from 'lucide-react'
 
 const SEM = { 1: '1st Sem', 2: '2nd Sem', 3: 'Summer' }
 const POOL_BADGE = { 'General Education': 'bg-lime-100 text-lime-800', PATHFIT: 'bg-sky-100 text-sky-800' }
 
-function Row({ r, instructors, busy, onAssign }) {
-  const [pickId, setPickId] = useState('')
+function Row({ r, instructors, busy, disabled, pickId, onPick, onAssign }) {
   // A GE row can only go to a GE instructor, a PATHFIT row only to PATHFIT — never mixed.
   const poolInstructors = instructors.filter(i => i.department === r.pool)
   const picked = poolInstructors.find(i => String(i.id) === String(pickId))
@@ -32,14 +31,14 @@ function Row({ r, instructors, busy, onAssign }) {
         <span className="text-xs font-semibold text-gray-500">{r.chair_department} <span className="text-gray-400">· {r.chair_name}</span></span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <select value={pickId} onChange={e => setPickId(e.target.value)}
-          className="flex-1 min-w-[220px] border-2 border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-green-500">
+        <select value={pickId} disabled={disabled} onChange={e => onPick(e.target.value)}
+          className="flex-1 min-w-[220px] border-2 border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-green-500 disabled:opacity-60">
           <option value="">— Pick a {r.pool} instructor —</option>
           {poolInstructors.map(i => (
             <option key={i.id} value={i.id}>{i.name} — {i.current_units.toFixed(2)} units loaded</option>
           ))}
         </select>
-        <button disabled={busy || !pickId || willExceed} onClick={() => onAssign(pickId)}
+        <button disabled={disabled || busy || !pickId || willExceed} onClick={() => onAssign(pickId)}
           className="flex items-center gap-1.5 px-4 py-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-semibold rounded-lg text-sm">
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Assign
         </button>
@@ -64,6 +63,11 @@ export default function GECoordinatorDashboard() {
   const [instructors, setInstructors] = useState([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState(null)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  // entryId -> instructorId, picked but not yet submitted. Kept in the parent
+  // (not per-row state) so assigning one subject's refetch doesn't wipe out
+  // picks already made on every other row still waiting in the list.
+  const [picks, setPicks] = useState({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -91,11 +95,14 @@ export default function GECoordinatorDashboard() {
   useEffect(() => { setCollegeFilter('all'); setProgramFilter('all') }, [year, semester])
   useEffect(() => { setProgramFilter('all') }, [collegeFilter])
 
+  const pick = (entryId, instructorId) => setPicks(p => ({ ...p, [entryId]: instructorId }))
+
   const assign = async (entryId, instructorId) => {
     setBusyId(entryId)
     try {
       const res = await geCoordinatorAPI.assign(entryId, instructorId)
       toast.success(res.data.message, { duration: 5000 })
+      setPicks(p => { const n = { ...p }; delete n[entryId]; return n })
       await load()
     } catch (err) {
       toast.error(err.response?.data?.message || 'Could not assign.', { duration: 6000 })
@@ -103,6 +110,34 @@ export default function GECoordinatorDashboard() {
       setBusyId(null)
     }
   }
+
+  // Commits every subject that currently has an instructor picked, in one go —
+  // sequential (not parallel) so two rows picking the same instructor can't
+  // both read their "units so far" before either write lands and together
+  // sneak them past the 27-unit cap.
+  const assignAll = async () => {
+    const entries = Object.entries(picks).filter(([, instructorId]) => instructorId)
+    if (entries.length === 0) return
+    setBulkBusy(true)
+    let ok = 0
+    const failures = []
+    for (const [entryId, instructorId] of entries) {
+      try {
+        await geCoordinatorAPI.assign(entryId, instructorId)
+        ok++
+      } catch (err) {
+        const row = queue.find(r => String(r.id) === String(entryId))
+        failures.push(`${row?.course_code || entryId}: ${err.response?.data?.message || 'failed'}`)
+      }
+    }
+    setPicks({})
+    setBulkBusy(false)
+    if (ok) toast.success(`Assigned ${ok} subject${ok === 1 ? '' : 's'}.`, { duration: 5000 })
+    if (failures.length) toast.error(failures.join('\n'), { duration: 8000 })
+    await load()
+  }
+
+  const pickedCount = Object.values(picks).filter(Boolean).length
 
   // Every college currently in the queue, regardless of the filter — so the
   // dropdown doesn't collapse down to just whichever one is picked.
@@ -161,11 +196,21 @@ export default function GECoordinatorDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
         <StatCard label="Pending Requests" value={String(filteredQueue.length)} icon={Inbox} color="gold" />
         <StatCard label="Colleges Waiting"    value={String(allColleges.length)} icon={Users} color="teal" />
         <StatCard label="GE/PATHFIT Instructors" value={String(instructors.length)} icon={CheckCircle2} color="green" />
       </div>
+
+      {queue.length > 0 && (
+        <div className="flex items-center justify-end gap-3 mb-4">
+          <span className="text-xs text-gray-500">{pickedCount} picked</span>
+          <button disabled={bulkBusy || pickedCount === 0} onClick={assignAll}
+            className="flex items-center gap-1.5 px-4 py-2 bg-green-700 hover:bg-green-800 disabled:opacity-50 text-white font-semibold rounded-lg text-sm">
+            {bulkBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCheck className="w-4 h-4" />} Assign All ({pickedCount})
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center h-40 text-gray-400"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading…</div>
@@ -189,7 +234,8 @@ export default function GECoordinatorDashboard() {
               <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-3">{college} ({byCollege[college].length})</h2>
               <div className="space-y-2">
                 {byCollege[college].map(r => (
-                  <Row key={r.id} r={r} instructors={instructors} busy={busyId === r.id}
+                  <Row key={r.id} r={r} instructors={instructors} busy={busyId === r.id} disabled={bulkBusy}
+                    pickId={picks[r.id] || ''} onPick={(instructorId) => pick(r.id, instructorId)}
                     onAssign={(instructorId) => assign(r.id, instructorId)} />
                 ))}
               </div>
