@@ -23,9 +23,12 @@ router.get('/queue', authenticate, authorize('ge_coordinator', 'admin'), async (
   const { year = '2026-2027', semester = 1 } = req.query
   try {
     const [rows] = await pool.query(`
-      SELECT fle.*, chairUser.name AS chair_name, chairUser.department AS chair_department
+      SELECT fle.*, chairUser.name AS chair_name, chairUser.department AS chair_department,
+        p.program AS subject_program
       FROM faculty_load_entries fle
       JOIN users chairUser ON chairUser.id = fle.chair_id
+      LEFT JOIN prospectus_subjects ps ON ps.id = fle.subject_id
+      LEFT JOIN prospectus p ON p.id = ps.prospectus_id
       WHERE fle.academic_year = ? AND fle.semester = ? AND fle.assigned_instructor_id IS NULL
       ORDER BY chairUser.department, fle.program_yr_sec
     `, [year, semester])

@@ -59,6 +59,7 @@ export default function GECoordinatorDashboard() {
   const [year, setYear] = useState('2026-2027')
   const [semester, setSemester] = useState(1)
   const [collegeFilter, setCollegeFilter] = useState('all')
+  const [programFilter, setProgramFilter] = useState('all')
   const [queue, setQueue] = useState([])
   const [instructors, setInstructors] = useState([])
   const [loading, setLoading] = useState(true)
@@ -83,9 +84,12 @@ export default function GECoordinatorDashboard() {
   useEffect(() => { load() }, [load])
 
   // The term is a real filter (server-side — only that academic year/semester
-  // is fetched at all); college is a client-side narrow-down over whatever
-  // that term's queue already holds.
-  useEffect(() => { setCollegeFilter('all') }, [year, semester])
+  // is fetched at all); college and program are client-side narrow-downs over
+  // whatever that term's queue already holds. Program is nested under
+  // college (CCIS runs BSIT and BSIS, for instance), so both reset together
+  // whenever the term changes, and program resets again whenever college does.
+  useEffect(() => { setCollegeFilter('all'); setProgramFilter('all') }, [year, semester])
+  useEffect(() => { setProgramFilter('all') }, [collegeFilter])
 
   const assign = async (entryId, instructorId) => {
     setBusyId(entryId)
@@ -103,7 +107,11 @@ export default function GECoordinatorDashboard() {
   // Every college currently in the queue, regardless of the filter — so the
   // dropdown doesn't collapse down to just whichever one is picked.
   const allColleges = [...new Set(queue.map(r => r.chair_department || '—'))].sort()
-  const filteredQueue = collegeFilter === 'all' ? queue : queue.filter(r => (r.chair_department || '—') === collegeFilter)
+  const collegeFilteredQueue = collegeFilter === 'all' ? queue : queue.filter(r => (r.chair_department || '—') === collegeFilter)
+  // Programs available within whichever college is currently selected —
+  // narrows further as the college filter narrows.
+  const allPrograms = [...new Set(collegeFilteredQueue.map(r => r.subject_program).filter(Boolean))].sort()
+  const filteredQueue = programFilter === 'all' ? collegeFilteredQueue : collegeFilteredQueue.filter(r => r.subject_program === programFilter)
 
   // Group the filtered queue by college, so one college's backlog doesn't bury another's.
   const byCollege = {}
@@ -143,6 +151,14 @@ export default function GECoordinatorDashboard() {
             {allColleges.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Program</label>
+          <select value={programFilter} onChange={e => setProgramFilter(e.target.value)} disabled={allPrograms.length === 0}
+            className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-green-500 min-w-[160px] disabled:opacity-50">
+            <option value="all">All programs</option>
+            {allPrograms.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
@@ -161,7 +177,10 @@ export default function GECoordinatorDashboard() {
       ) : filteredQueue.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-200 flex flex-col items-center py-14 text-gray-400">
           <CheckCircle2 className="w-8 h-8 mb-2 opacity-40" />
-          <p className="text-sm">{collegeFilter} has nothing unassigned this term.</p>
+          <p className="text-sm">
+            {collegeFilter === 'all' ? 'Nothing' : collegeFilter}
+            {programFilter !== 'all' ? ` (${programFilter})` : ''} has nothing unassigned this term.
+          </p>
         </div>
       ) : (
         <div className="space-y-6">
