@@ -8,7 +8,10 @@
  *   2. No room hosts two sessions at the same time
  *   3. No section attends two classes at the same time
  *   4. Room type must match session type (Lecture → Lecture, Lab → Laboratory)
- *   5. Sessions fit within 07:00–21:00; no crossing the 12:00–13:00 lunch break
+ *   5. Sessions fit within 08:00–17:00 (Mon–Fri); no crossing the 12:00–13:00
+ *      lunch break. Only auto-generation is bound by this window — a manual
+ *      override (admin edits a slot directly) may set any day/time, which is
+ *      how an overtime instructor's class gets scheduled past 5 PM.
  *   6. Mobility Level 1 (wheelchair) → only floor 1 accessible rooms
  *   7. Building program priority — once a building has a ranked program list
  *      (via building_priorities), only those programs may use its rooms.
@@ -66,10 +69,10 @@ function maskOf(days) {
   return days.reduce((acc, d) => acc | (DAY_BITS[d] || 0), 0)
 }
 
-// ── candidate start times: 30-min steps, 07:00–20:30, no 12:00–13:00 ─────────
+// ── candidate start times: 30-min steps, 08:00–16:30, no 12:00–13:00 ─────────
 
 const CANDIDATE_STARTS = []
-for (let h = 7; h <= 20; h++) {
+for (let h = 8; h <= 16; h++) {
   for (let m = 0; m < 60; m += 30) {
     const total = h * 60 + m
     if (total >= 720 && total < 780) continue   // skip lunch
@@ -79,7 +82,7 @@ for (let h = 7; h <= 20; h++) {
 
 // True if at least one of the session's meeting patterns can fit on some day
 // at all, independent of room/instructor/section availability — i.e. the
-// pattern's duration doesn't structurally exceed the 07:00–21:00 window once
+// pattern's duration doesn't structurally exceed the 08:00–17:00 window once
 // the 12:00–13:00 lunch break (which a session may never cross) is accounted
 // for. A pattern that fails this can NEVER be scheduled no matter how many
 // rooms exist or how long an engine searches — the honest reason is "split
@@ -88,7 +91,7 @@ function hasAnyValidStart(patterns) {
   return patterns.some(p =>
     CANDIDATE_STARTS.some(startMin => {
       const endMin = startMin + p.durationMin
-      if (endMin > 1260) return false
+      if (endMin > 1020) return false
       if (startMin < 720 && endMin > 720) return false
       if (startMin >= 720 && startMin < 780) return false
       return true
@@ -133,7 +136,7 @@ function buildPatterns(lecHours, labHours) {
     sessions.push({
       sessionType: 'lab',
       roomType: 'Laboratory',
-      patterns: ['Saturday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+      patterns: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
         .map(d => ({ days: [d], durationMin: labDur })),
     })
   }
@@ -305,7 +308,7 @@ function tryOnlineFallback(session, scheduled) {
     for (const startMin of CANDIDATE_STARTS) {
       const endMin = startMin + pattern.durationMin
 
-      if (endMin > 1260)                      continue  // must end by 21:00
+      if (endMin > 1020)                      continue  // must end by 17:00
       if (startMin < 720 && endMin > 720)     continue  // crosses lunch start
       if (startMin >= 720 && startMin < 780)  continue  // starts during lunch
 
@@ -456,7 +459,7 @@ export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPrior
         const endMin = startMin + pattern.durationMin
 
         // Hard time-boundary constraints
-        if (endMin > 1260)                          continue  // must end by 21:00
+        if (endMin > 1020)                          continue  // must end by 17:00
         if (startMin < 720 && endMin > 720)         continue  // crosses lunch start
         if (startMin >= 720 && startMin < 780)      continue  // starts during lunch
 
@@ -535,7 +538,7 @@ export function generateSchedule(entries, rooms, mobilityMap = {}, buildingPrior
       let reason
       if (!hasAnyValidStart(session.patterns)) {
         const longestPatternHrs = Math.max(...session.patterns.map(p => p.durationMin)) / 60
-        reason = `${longestPatternHrs}-hour single-day session doesn't fit any day within 07:00–21:00 around the 12:00–13:00 lunch break — split these hours across multiple days in the faculty load entry`
+        reason = `${longestPatternHrs}-hour single-day session doesn't fit any day within 08:00–17:00 around the 12:00–13:00 lunch break — split these hours across multiple days in the faculty load entry`
       } else if (!canGoOnline) {
         reason = session.mobilityLevel === 1
           ? `No accessible ground-floor ${session.roomType} room available (labs/physical-activity subjects require a real room, never online)`
@@ -583,7 +586,7 @@ export function precomputeSessionCandidates(sessions, rooms, buildingPriorities)
     if (validStartsCache.has(durationMin)) return validStartsCache.get(durationMin)
     const starts = CANDIDATE_STARTS.filter(startMin => {
       const endMin = startMin + durationMin
-      if (endMin > 1260) return false
+      if (endMin > 1020) return false
       if (startMin < 720 && endMin > 720) return false
       if (startMin >= 720 && startMin < 780) return false
       return true
@@ -811,7 +814,7 @@ export function generateScheduleGA(entries, rooms, mobilityMap = {}, buildingPri
     if (!placement) {
       const longestPatternHrs = Math.max(...session.patterns.map(p => p.durationMin)) / 60
       const reason = !hasAnyValidStart(session.patterns)
-        ? `${longestPatternHrs}-hour single-day session doesn't fit any day within 07:00–21:00 around the 12:00–13:00 lunch break — split these hours across multiple days in the faculty load entry`
+        ? `${longestPatternHrs}-hour single-day session doesn't fit any day within 08:00–17:00 around the 12:00–13:00 lunch break — split these hours across multiple days in the faculty load entry`
         : cand.candidateRooms.length === 0 && !cand.canGoOnline
           ? `No ${session.roomType} room available (labs/physical-activity subjects require a real room, never online)`
           : 'The genetic algorithm could not find a conflict-free placement within its generation budget'
@@ -1037,7 +1040,7 @@ export async function generateScheduleORTools(entries, rooms, mobilityMap = {}, 
       const cand = candidates[a.sessionIndex]
       const longestPatternHrs = Math.max(...session.patterns.map(p => p.durationMin)) / 60
       const reason = !hasAnyValidStart(session.patterns)
-        ? `${longestPatternHrs}-hour single-day session doesn't fit any day within 07:00–21:00 around the 12:00–13:00 lunch break — split these hours across multiple days in the faculty load entry`
+        ? `${longestPatternHrs}-hour single-day session doesn't fit any day within 08:00–17:00 around the 12:00–13:00 lunch break — split these hours across multiple days in the faculty load entry`
         : cand.candidateRooms.length === 0 && !cand.canGoOnline
           ? `No ${session.roomType} room available (labs/physical-activity subjects require a real room, never online)`
           : 'OR-Tools could not find a conflict-free placement within its time budget'

@@ -197,6 +197,7 @@ export default function ScheduleGenerator() {
   const [editSlot, setEditSlot] = useState(null)
   const [filterBy, setFilterBy] = useState('all')   // 'all' | instructor id | room id | section string
   const [filterType, setFilterType] = useState('all') // 'all' | 'instructor' | 'room' | 'section'
+  const [dayFilter, setDayFilter] = useState('all')   // 'all' | one of DAYS — which day column(s) to show
   const [unscheduled, setUnscheduled] = useState([])
   const [showUnscheduled, setShowUnscheduled] = useState(false)
   const [engine, setEngine] = useState('greedy')   // 'greedy' | 'genetic' | 'ortools'
@@ -289,7 +290,11 @@ export default function ScheduleGenerator() {
     }
   }
 
-  const colW = dayColumnWidth(byDay, DAYS)
+  // Which day columns to actually render — "All" shows the full week, picking
+  // one day narrows the grid to just that column (full width instead of
+  // competing for space with the other five).
+  const displayedDays = dayFilter === 'all' ? DAYS : [dayFilter]
+  const colW = dayColumnWidth(byDay, displayedDays)
   const publishedCount = schedules.filter(s => s.is_published).length
   // Once a term is published it's final and lives in Transaction History, so
   // the timetable and its tools are hidden here.
@@ -486,6 +491,21 @@ export default function ScheduleGenerator() {
               </button>
             </div>
 
+            {/* By Day */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide whitespace-nowrap">Day:</span>
+              <button onClick={()=>setDayFilter('all')}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-lg border-2 transition ${dayFilter==='all'?'bg-green-700 border-green-700 text-white':'bg-white border-gray-200 text-gray-600 hover:border-green-400'}`}>
+                All
+              </button>
+              {DAYS.map(d => (
+                <button key={d} onClick={()=>setDayFilter(d)}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg border-2 transition ${dayFilter===d?'bg-green-700 border-green-700 text-white':'bg-white border-gray-200 text-gray-600 hover:border-green-400'}`}>
+                  {DAY_SHORT[d]}
+                </button>
+              ))}
+            </div>
+
             {/* By Department */}
             {departments.length > 0 && (
               <div className="flex items-center gap-2 flex-wrap">
@@ -569,17 +589,17 @@ export default function ScheduleGenerator() {
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden print:shadow-none">
           <div className="overflow-x-auto">
-            <div style={{ minWidth: 60 + 6 * colW }}>
+            <div style={{ minWidth: 60 + displayedDays.length * colW }}>
               {/* Day headers */}
-              <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: `60px repeat(6, minmax(${colW}px, 1fr))` }}>
+              <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: `60px repeat(${displayedDays.length}, minmax(${colW}px, 1fr))` }}>
                 <div className="py-2 text-xs text-gray-400 font-semibold text-center border-r border-gray-100"></div>
-                {DAYS.map(d => (
+                {displayedDays.map(d => (
                   <div key={d} className="py-2 text-xs font-bold text-center text-gray-700 border-r border-gray-100 last:border-0">{DAY_SHORT[d]}</div>
                 ))}
               </div>
 
               {/* Grid body */}
-              <div className="grid" style={{ gridTemplateColumns: `60px repeat(6, minmax(${colW}px, 1fr))` }}>
+              <div className="grid" style={{ gridTemplateColumns: `60px repeat(${displayedDays.length}, minmax(${colW}px, 1fr))` }}>
                 {/* Time labels */}
                 <div className="relative" style={{ height: GRID_HEIGHT }}>
                   {HOUR_LABELS.map(h => (
@@ -593,7 +613,7 @@ export default function ScheduleGenerator() {
                 </div>
 
                 {/* Day columns */}
-                {DAYS.map(day => (
+                {displayedDays.map(day => (
                   <div key={day} className="relative border-l border-gray-100" style={{ height: GRID_HEIGHT }}>
                     {/* Hour grid lines */}
                     {HOUR_LABELS.map(h => (
