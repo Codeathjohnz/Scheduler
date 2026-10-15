@@ -11,6 +11,7 @@ const ROLE_PATHS = {
   [ROLES.DEAN]:              '/dean',
   [ROLES.CHIEF_CPD]:         '/chief-cpd',
   [ROLES.QUALITY_ASSURANCE]: '/qa',
+  [ROLES.GE_COORDINATOR]:    '/ge-coordinator',
   [ROLES.VPAA]:              '/vpaa',
   [ROLES.ADMIN]:             '/admin',
   [ROLES.INSTRUCTOR]:        '/instructor',
