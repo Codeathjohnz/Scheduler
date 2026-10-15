@@ -112,16 +112,18 @@ function AssignInstructor({ r, busy, onAssign }) {
   )
 }
 
-// Pick which of the chair's own unassigned subjects needs an instructor from
-// another college, then start the chain for it — without having to go find
-// that subject in Faculty Load first.
+// Pick which of the chair's own unassigned subjects need an instructor from
+// another college — one or several at once, e.g. 3 sections of the same
+// subject nobody in the department can cover — then start one chain per
+// subject for the same college and note, without having to go find each one
+// in Faculty Load individually.
 const CROSS_DEPT_POOL = /^(GE|PATHFIT)\b/i
 function NewRequestModal({ onClose, onSent }) {
   const [year, setYear] = useState('2026-2027')
   const [semester, setSemester] = useState(1)
   const [entries, setEntries] = useState([])
   const [loadingEntries, setLoadingEntries] = useState(true)
-  const [entryId, setEntryId] = useState('')
+  const [selected, setSelected] = useState(new Set())
   const [departments, setDepartments] = useState([])
   const [target, setTarget] = useState('')
   const [note, setNote] = useState('')
@@ -129,6 +131,7 @@ function NewRequestModal({ onClose, onSent }) {
 
   useEffect(() => {
     setLoadingEntries(true)
+    setSelected(new Set())
     Promise.all([facultyLoadAPI.getAll(year, semester), crossDeptAPI.accessDepartments(year, semester)])
       .then(([e, d]) => {
         // Genuinely unassigned, or still sitting on a placeholder ("Instructor
@@ -143,19 +146,39 @@ function NewRequestModal({ onClose, onSent }) {
       .finally(() => setLoadingEntries(false))
   }, [year, semester])
 
-  const picked = entries.find(e => String(e.id) === String(entryId))
-  useEffect(() => { setNote(picked?.needs_instructor_reason || '') }, [entryId])
+  const toggle = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const pickedEntries = entries.filter(e => selected.has(e.id))
+  // One reason pre-fills the note; more than one is too mixed to guess at, left blank to write once for all of them.
+  useEffect(() => {
+    setNote(pickedEntries.length === 1 ? (pickedEntries[0].needs_instructor_reason || '') : '')
+  }, [selected.size])
 
   const submit = async () => {
-    if (!entryId) { toast.error('Pick a subject first.'); return }
+    if (selected.size === 0) { toast.error('Pick at least one subject.'); return }
     if (!target) { toast.error('Pick a college to ask.'); return }
     setSending(true)
     try {
-      const res = await crossDeptChainAPI.create({ entry_id: Number(entryId), target_department: target, note })
-      toast.success(res.data.message || 'Sent to your Dean.')
-      onSent?.()
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Could not send the request.', { duration: 6000 })
+      const results = await Promise.allSettled(
+        [...selected].map(id => crossDeptChainAPI.create({ entry_id: Number(id), target_department: target, note }))
+      )
+      const ok = results.filter(r => r.status === 'fulfilled')
+      const failed = results.map((r, i) => ({ r, entry: pickedEntries[i] })).filter(x => x.r.status === 'rejected')
+      if (ok.length) toast.success(`Sent ${ok.length} request${ok.length > 1 ? 's' : ''} to your Dean.`, { duration: 6000 })
+      if (failed.length) {
+        toast.error(
+          `${failed.length} couldn't be sent: ${failed.map(x => `${x.entry.course_code} (${x.r.reason?.response?.data?.message || 'error'})`).join('; ')}`,
+          { duration: 8000 }
+        )
+      }
+      if (ok.length) onSent?.()
     } finally {
       setSending(false)
     }
@@ -186,25 +209,29 @@ function NewRequestModal({ onClose, onSent }) {
 
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">
-              Subject {loadingEntries && <span className="text-gray-400 font-normal">(loading...)</span>}
+              Subjects {loadingEntries && <span className="text-gray-400 font-normal">(loading...)</span>}
+              {selected.size > 0 && <span className="text-green-700 font-normal"> · {selected.size} selected</span>}
             </label>
-            <select value={entryId} onChange={e => setEntryId(e.target.value)}
-              className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-green-500">
-              <option value="">— Pick a subject —</option>
-              {entries.map(e => (
-                <option key={e.id} value={e.id}>
-                  {e.course_code} — {e.descriptive_title} ({e.program_yr_sec})
-                  {e.instructor_is_placeholder ? ` — on ${e.instructor_name}` : ''}
-                  {e.needs_instructor_reason ? ' ⚠ flagged' : ''}
-                </option>
-              ))}
-            </select>
-            {!loadingEntries && entries.length === 0 && (
+            {!loadingEntries && entries.length === 0 ? (
               <p className="text-xs text-gray-400 mt-1">Nothing eligible for this term — every subject already has a real instructor, or GE/PATHFIT (which go through the GE Coordinator instead).</p>
+            ) : (
+              <div className="border-2 border-gray-200 rounded-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
+                {entries.map(e => (
+                  <label key={e.id} className="flex items-start gap-2.5 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50">
+                    <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggle(e.id)}
+                      className="mt-0.5 accent-green-700" />
+                    <span className="min-w-0">
+                      <span className="font-mono font-semibold text-green-800">{e.course_code}</span> — {e.descriptive_title} <span className="text-gray-500">({e.program_yr_sec})</span>
+                      {e.instructor_is_placeholder ? <span className="text-gray-400"> — on {e.instructor_name}</span> : null}
+                      {e.needs_instructor_reason ? <span className="text-amber-700"> ⚠ flagged</span> : null}
+                    </span>
+                  </label>
+                ))}
+              </div>
             )}
           </div>
 
-          {picked && (
+          {selected.size > 0 && (
             <>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">College to ask</label>
@@ -213,6 +240,7 @@ function NewRequestModal({ onClose, onSent }) {
                   <option value="">— Pick a college —</option>
                   {departments.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
+                {selected.size > 1 && <p className="text-xs text-gray-400 mt-1">All {selected.size} selected subjects go to the same college, as separate requests.</p>}
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Note</label>
@@ -224,9 +252,11 @@ function NewRequestModal({ onClose, onSent }) {
           )}
 
           <div className="flex gap-3 pt-1">
-            <button onClick={submit} disabled={sending || !entryId || !target}
+            <button onClick={submit} disabled={sending || selected.size === 0 || !target}
               className="flex-1 flex items-center justify-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-bold py-2.5 rounded-xl transition text-sm">
-              {sending ? <><Loader2 className="w-4 h-4 animate-spin"/>Sending...</> : <><Send className="w-4 h-4"/>Send to my Dean</>}
+              {sending
+                ? <><Loader2 className="w-4 h-4 animate-spin"/>Sending...</>
+                : <><Send className="w-4 h-4"/>Send {selected.size > 1 ? `${selected.size} requests` : ''} to my Dean</>}
             </button>
             <button onClick={onClose}
               className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-xl transition text-sm">Cancel</button>
