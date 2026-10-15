@@ -351,6 +351,24 @@ router.get('/instructors-all', authenticate, authorize('chair', 'admin', 'ge_coo
   }
 })
 
+// The same subject landing twice on one section's load sheet (a double
+// submit, or re-adding after a page glitch) double-books whichever
+// instructor it's assigned to once the schedule is generated — the engine
+// then reports a real "assigned to the same course twice" conflict, which
+// looks like a scheduling bug but is actually duplicate source data.
+// excludeId lets PUT check "does this change collide with some OTHER row"
+// without the row being edited flagging itself as its own duplicate.
+async function duplicateEntryExists(chairId, academicYear, semester, subjectId, programYrSec, excludeId = null) {
+  const section = (programYrSec || '').trim()
+  if (!section) return false
+  const params = [chairId, academicYear, semester, subjectId, section]
+  let sql = `SELECT id FROM faculty_load_entries
+    WHERE chair_id = ? AND academic_year = ? AND semester = ? AND subject_id = ? AND TRIM(program_yr_sec) = ?`
+  if (excludeId) { sql += ' AND id != ?'; params.push(excludeId) }
+  const [[dup]] = await pool.query(sql, params)
+  return !!dup
+}
+
 // POST /api/faculty-load — a subject must exist in the uploaded prospectus;
 // course_code/descriptive_title/units/lec_hours/lab_hours are always derived
 // server-side from that prospectus row, never trusted from the client.
@@ -363,6 +381,9 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
     const [[subject]] = await pool.query('SELECT * FROM prospectus_subjects WHERE id = ?', [subject_id])
     if (!subject) {
       return res.status(400).json({ message: 'That subject was not found in the uploaded prospectus.' })
+    }
+    if (await duplicateEntryExists(req.user.id, academic_year, semester, subject_id, program_yr_sec)) {
+      return res.status(409).json({ message: `${subject.course_code} is already on the load sheet for ${program_yr_sec} this term — edit that entry instead of adding it again.` })
     }
     // Another department's instructor → that's not a direct pick here at all.
     const cross = await otherDepartmentTarget(req.user.id, req.user.role, assigned_instructor_id)
@@ -399,7 +420,7 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
     // Only when the instructor is actually being CHANGED: an inline edit of
     // Section/Room re-sends the current (or still-unassigned) value untouched.
     const [[before]] = await pool.query(
-      'SELECT assigned_instructor_id, subject_id, course_code, lec_hours, lab_hours, descriptive_title, units, academic_year, semester FROM faculty_load_entries WHERE id = ?',
+      'SELECT chair_id, assigned_instructor_id, subject_id, course_code, lec_hours, lab_hours, descriptive_title, units, academic_year, semester FROM faculty_load_entries WHERE id = ?',
       [req.params.id]
     )
     if (!before) return res.status(404).json({ message: 'Entry not found.' })
@@ -413,6 +434,10 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
       subject = found
     }
     const effectiveCourseCode = subject ? subject.course_code : before.course_code
+    const effectiveSubjectId = subject_id || before.subject_id
+    if (effectiveSubjectId && await duplicateEntryExists(before.chair_id, before.academic_year, before.semester, effectiveSubjectId, program_yr_sec, req.params.id)) {
+      return res.status(409).json({ message: `${effectiveCourseCode} is already on the load sheet for ${program_yr_sec} this term — that's a different entry.` })
+    }
 
     const instructorChanged = Number(assigned_instructor_id || 0) !== Number(before.assigned_instructor_id || 0)
     if (instructorChanged) {
