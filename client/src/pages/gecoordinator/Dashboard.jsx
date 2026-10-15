@@ -58,6 +58,7 @@ export default function GECoordinatorDashboard() {
   const { user } = useAuth()
   const [year, setYear] = useState('2026-2027')
   const [semester, setSemester] = useState(1)
+  const [collegeFilter, setCollegeFilter] = useState('all')
   const [queue, setQueue] = useState([])
   const [instructors, setInstructors] = useState([])
   const [loading, setLoading] = useState(true)
@@ -81,6 +82,11 @@ export default function GECoordinatorDashboard() {
 
   useEffect(() => { load() }, [load])
 
+  // The term is a real filter (server-side — only that academic year/semester
+  // is fetched at all); college is a client-side narrow-down over whatever
+  // that term's queue already holds.
+  useEffect(() => { setCollegeFilter('all') }, [year, semester])
+
   const assign = async (entryId, instructorId) => {
     setBusyId(entryId)
     try {
@@ -94,9 +100,14 @@ export default function GECoordinatorDashboard() {
     }
   }
 
-  // Group the queue by college, so one college's backlog doesn't bury another's.
+  // Every college currently in the queue, regardless of the filter — so the
+  // dropdown doesn't collapse down to just whichever one is picked.
+  const allColleges = [...new Set(queue.map(r => r.chair_department || '—'))].sort()
+  const filteredQueue = collegeFilter === 'all' ? queue : queue.filter(r => (r.chair_department || '—') === collegeFilter)
+
+  // Group the filtered queue by college, so one college's backlog doesn't bury another's.
   const byCollege = {}
-  for (const r of queue) {
+  for (const r of filteredQueue) {
     const k = r.chair_department || '—'
     if (!byCollege[k]) byCollege[k] = []
     byCollege[k].push(r)
@@ -124,11 +135,19 @@ export default function GECoordinatorDashboard() {
             {Object.entries(SEM).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
         </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">College</label>
+          <select value={collegeFilter} onChange={e => setCollegeFilter(e.target.value)}
+            className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-green-500 min-w-[180px]">
+            <option value="all">All colleges</option>
+            {allColleges.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-        <StatCard label="Unassigned Subjects" value={String(queue.length)} icon={Inbox} color="gold" />
-        <StatCard label="Colleges Waiting"    value={String(colleges.length)} icon={Users} color="teal" />
+        <StatCard label="Unassigned Subjects" value={String(filteredQueue.length)} icon={Inbox} color="gold" />
+        <StatCard label="Colleges Waiting"    value={String(allColleges.length)} icon={Users} color="teal" />
         <StatCard label="GE/PATHFIT Instructors" value={String(instructors.length)} icon={CheckCircle2} color="green" />
       </div>
 
@@ -138,6 +157,11 @@ export default function GECoordinatorDashboard() {
         <div className="bg-white rounded-2xl border border-gray-200 flex flex-col items-center py-14 text-gray-400">
           <CheckCircle2 className="w-8 h-8 mb-2 opacity-40" />
           <p className="text-sm">Every college's GE and PATHFIT subjects for this term are assigned.</p>
+        </div>
+      ) : filteredQueue.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-gray-200 flex flex-col items-center py-14 text-gray-400">
+          <CheckCircle2 className="w-8 h-8 mb-2 opacity-40" />
+          <p className="text-sm">{collegeFilter} has nothing unassigned this term.</p>
         </div>
       ) : (
         <div className="space-y-6">
