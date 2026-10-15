@@ -1,10 +1,11 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from '../components/common/Sidebar.jsx'
-import { LayoutDashboard, ClipboardCheck, Accessibility, CheckSquare, PenTool, ClipboardList, ArrowLeftRight , Bell} from 'lucide-react'
+import { LayoutDashboard, ClipboardCheck, Accessibility, CheckSquare, PenTool, ClipboardList, ArrowLeftRight, CalendarDays, Bell} from 'lucide-react'
 
 const nav = [
   { to: '/dean', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/dean/review', icon: ClipboardCheck, label: 'Review Submissions' },
+  { to: '/dean/schedule', icon: CalendarDays, label: 'My Schedule' },
   { to: '/dean/my-load', icon: ClipboardList, label: 'My Faculty Load' },
   { to: '/dean/teaching-requests', icon: ArrowLeftRight, label: 'Teaching Requests' },
   { to: '/dean/confirm-load', icon: CheckSquare, label: 'Confirm My Load' },

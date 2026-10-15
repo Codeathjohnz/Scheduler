@@ -121,6 +121,7 @@ export default function App() {
             <Route index element={<DeanDashboard />} />
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="review" element={<DeanReview />} />
+            <Route path="schedule" element={<InstructorSchedule />} />
             <Route path="my-load" element={<InstructorMyLoad />} />
             <Route path="teaching-requests" element={<TeachingRequests />} />
             <Route path="confirm-load" element={<InstructorConfirmLoad />} />
