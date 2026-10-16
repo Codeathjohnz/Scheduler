@@ -6,7 +6,7 @@ import api from '../../services/api.js'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import {
   Cpu, Printer, AlertTriangle, CheckCircle2,
-  Loader2, X, Edit2, Globe, Trash2
+  Loader2, X, Edit2, Globe, Trash2, RotateCcw
 } from 'lucide-react'
 import RoomTypeBadge, { roomTypeShort, roomMismatch } from '../../components/common/RoomTypeBadge.jsx'
 
@@ -253,6 +253,22 @@ export default function ScheduleGenerator() {
       toast.success('Schedules cleared.')
       setSchedules([]); setConflicts([])
     } catch (err) { toast.error(err.response?.data?.message || 'Failed.') }
+  }
+
+  // "Revert to Validated" in Validate Data only resets a submission's own
+  // workflow status — it can never regenerate on its own because /generate
+  // still refuses a term with any published row. This is the other half:
+  // explicitly reopening the term, which is why it needs its own strong
+  // confirmation (instructors/students currently see this as the final
+  // schedule).
+  const handleUnpublish = async () => {
+    const semLabel = semester === 1 ? '1st Semester' : semester === 2 ? '2nd Semester' : 'Summer'
+    if (!confirm(`Unpublish ${semLabel} ${year}? Instructors and students currently see this as the final schedule — this reopens it for regeneration until it's published again.`)) return
+    try {
+      const r = await api.post('/scheduling/unpublish', { year, semester })
+      toast.success(r.data.message)
+      fetchSchedules()
+    } catch (err) { toast.error(err.response?.data?.message || 'Unpublish failed.') }
   }
 
   // Filter options
@@ -586,6 +602,13 @@ export default function ScheduleGenerator() {
                   <CheckCircle2 className="w-3.5 h-3.5"/> No conflicts detected in the published schedule.
                 </p>
               )}
+              <button onClick={handleUnpublish}
+                className="mt-4 flex items-center gap-2 bg-white hover:bg-red-50 border-2 border-gray-200 hover:border-red-300 text-gray-600 hover:text-red-600 font-semibold px-4 py-2 rounded-xl transition text-xs">
+                <RotateCcw className="w-3.5 h-3.5"/> Unpublish this term
+              </button>
+              <p className="text-xs text-gray-400 mt-2 max-w-sm text-center">
+                Reopens it for Generate/Clear. Do this only after reverting the relevant submission(s) back to Validated in Validate Data.
+              </p>
             </>
           ) : (
             <>

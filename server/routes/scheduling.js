@@ -302,6 +302,32 @@ router.post('/publish', authenticate, authorize('admin'), async (req, res) => {
   }
 })
 
+// ── POST /api/scheduling/unpublish ────────────────────────────────────────────
+// Reopens an already-published term so it can be regenerated — "Revert to
+// Validated" in Validate Data only resets a submission's own workflow status
+// back to 'validated'; it was never enough on its own to get past the
+// is_published guard above in /generate, which blocks the whole term. This is
+// the other half: an admin must explicitly unpublish before regenerating,
+// since the current published schedule is what instructors/students see as
+// final right now. Transaction History is left untouched — it's a record of
+// what WAS published and when, not a mirror of the live state.
+router.post('/unpublish', authenticate, authorize('admin'), async (req, res) => {
+  const { year, semester } = req.body
+  if (!year || !semester) return res.status(400).json({ message: 'year and semester are required.' })
+  try {
+    const [result] = await pool.query(
+      'UPDATE generated_schedules SET is_published = 0 WHERE academic_year = ? AND semester = ? AND is_published = 1',
+      [year, semester]
+    )
+    if (!result.affectedRows) {
+      return res.status(400).json({ message: 'This term is not currently published.' })
+    }
+    res.json({ message: `Unpublished ${result.affectedRows} session(s). You can now Clear and regenerate this term.` })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
 // GET /api/scheduling/history — registrar's record of what was published, and when
 router.get('/history', authenticate, authorize('admin'), async (req, res) => {
   try {

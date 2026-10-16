@@ -65,7 +65,7 @@ export default function AdminValidation() {
       await submissionsAPI.adminAction(id, action, reason)
       toast.success(
         action === 'validate' ? 'Submission validated. Ready for schedule generation.'
-        : action === 'revert' ? 'Reverted to Validated — ready to regenerate.'
+        : action === 'revert' ? 'Reverted to Validated. If this term is already published, also Unpublish it in Schedule Generator before regenerating.'
         : 'Submission returned to Program Chair for revision.'
       )
       fetchSubmissions()
@@ -371,7 +371,7 @@ function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpa
               <button
                 onClick={() => onAction('revert')}
                 disabled={acting}
-                title="Send this back to Validated so you can regenerate the schedule (e.g. after a scheduler fix, room change, or updated faculty load)."
+                title="Send this back to Validated so it's picked up by the next regeneration. If this term's schedule is already published, you'll also need to Unpublish it in Schedule Generator first — Revert alone doesn't reopen a published term."
                 className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition"
               >
                 {acting

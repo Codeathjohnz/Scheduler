@@ -192,6 +192,7 @@ export const schedulingAPI = {
   generate: (data)      => api.post('/scheduling/generate', data),
   update:   (id, data)  => api.put(`/scheduling/${id}`, data),
   publish:  (data)      => api.post('/scheduling/publish', data),
+  unpublish:(data)      => api.post('/scheduling/unpublish', data),
   clear:    (year, sem) => api.delete(`/scheduling/clear?year=${year}&semester=${sem}`),
   getRooms: ()          => api.get('/scheduling/rooms'),
   history:  ()          => api.get('/scheduling/history'),
