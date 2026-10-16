@@ -617,13 +617,28 @@ router.patch('/:id/admin', authenticate, authorize('admin'), async (req, res) =>
   // a scheduler fix, a room change, or new faculty load entries) requires
   // stepping back to 'validated' first. Only valid from 'scheduled'.
   if (action === 'revert') {
-    const [[sub]] = await pool.query('SELECT status FROM submissions WHERE id = ?', [req.params.id])
+    const [[sub]] = await pool.query('SELECT status, academic_year, semester FROM submissions WHERE id = ?', [req.params.id])
     if (!sub) return res.status(404).json({ message: 'Submission not found.' })
     if (sub.status !== 'scheduled') {
       return res.status(400).json({ message: `Can only revert a submission that is currently Scheduled (this one is ${sub.status.replace(/_/g, ' ')}).` })
     }
     await pool.query('UPDATE submissions SET status = ? WHERE id = ?', ['validated', req.params.id])
-    return res.json({ message: 'Submission reverted to Validated — ready to regenerate.' })
+    // /scheduling/generate refuses a term with ANY published row, so this
+    // submission can never actually be picked up again unless the whole
+    // term reopens — not just this one chair's slice of it, since publish
+    // (like generate) always operates on the whole term at once. Doing
+    // that here, atomically with the status change, is what makes "Revert"
+    // actually mean "ready to regenerate" rather than a dead end the admin
+    // has to separately unpublish from Schedule Generator.
+    const [unpub] = await pool.query(
+      'UPDATE generated_schedules SET is_published = 0 WHERE academic_year = ? AND semester = ? AND is_published = 1',
+      [sub.academic_year, sub.semester]
+    )
+    return res.json({
+      message: unpub.affectedRows
+        ? 'Reverted to Validated and unpublished the term — go to Schedule Generator, Clear, then Generate again.'
+        : 'Reverted to Validated — ready to regenerate.',
+    })
   }
 
   try {
