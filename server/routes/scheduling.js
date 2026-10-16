@@ -345,8 +345,30 @@ router.get('/history', authenticate, authorize('admin'), async (req, res) => {
 router.delete('/clear', authenticate, authorize('admin'), async (req, res) => {
   const { year, semester } = req.query
   try {
+    const [[published]] = await pool.query(
+      'SELECT COUNT(*) AS n FROM generated_schedules WHERE academic_year=? AND semester=? AND is_published=1',
+      [year, semester]
+    )
+    if (published.n > 0) {
+      return res.status(400).json({ message: 'This term is published — unpublish it first before clearing.' })
+    }
     await pool.query('DELETE FROM generated_schedules WHERE academic_year=? AND semester=?', [year, semester])
-    res.json({ message: 'Schedules cleared.' })
+    // A submission marked 'scheduled' means "a schedule exists for this" —
+    // that's no longer true once its rows are gone, and nothing else steps
+    // it back to 'validated' on its own. Left alone it's stuck: invisible to
+    // /generate (which only picks up 'validated' submissions) unless an
+    // admin remembers to separately revert it in Validate Data. Clearing
+    // always reverts it immediately, so the very next Generate can pick it
+    // back up without that extra manual step.
+    const [reverted] = await pool.query(
+      "UPDATE submissions SET status = 'validated' WHERE academic_year = ? AND semester = ? AND status = 'scheduled'",
+      [year, semester]
+    )
+    res.json({
+      message: reverted.affectedRows
+        ? `Schedules cleared. ${reverted.affectedRows} submission(s) reverted to Validated — ready to regenerate.`
+        : 'Schedules cleared.',
+    })
   } catch (err) { res.status(500).json({ message: err.message }) }
 })
 

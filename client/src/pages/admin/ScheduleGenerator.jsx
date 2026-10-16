@@ -249,8 +249,8 @@ export default function ScheduleGenerator() {
   const handleClear = async () => {
     if (!confirm('Clear ALL schedule entries for this term?')) return
     try {
-      await api.delete(`/scheduling/clear?year=${year}&semester=${semester}`)
-      toast.success('Schedules cleared.')
+      const r = await api.delete(`/scheduling/clear?year=${year}&semester=${semester}`)
+      toast.success(r.data.message)
       setSchedules([]); setConflicts([])
     } catch (err) { toast.error(err.response?.data?.message || 'Failed.') }
   }
