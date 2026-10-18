@@ -637,12 +637,13 @@ function randomGene(cand) {
   return { type: 'online', patternIdx, startMin }
 }
 
-// Convert a greedy generateSchedule() result into gene form, for seeding —
-// guarantees the GA's best-ever individual is never worse than plain greedy,
-// and gives evolution a strong starting point to refine rather than search
-// from scratch.
-function seedFromGreedy(sessions, candidates, entries, rooms, mobilityMap, buildingPriorities) {
-  const { scheduled } = generateSchedule(entries, rooms, mobilityMap, buildingPriorities)
+// Convert any prior engine's `scheduled` result into gene form, for seeding —
+// guarantees the GA's (or OR-Tools' warm-started) best-ever individual is
+// never worse than whatever produced `scheduled`, and gives the next stage a
+// strong starting point to refine rather than search from scratch. Shared by
+// seedFromGreedy (below) and the hybrid GA→OR-Tools engine, which seeds
+// from the GA's own output instead of a fresh greedy run.
+function seedFromScheduledRows(scheduled, sessions, candidates) {
   const byKey = new Map(scheduled.map(s => [`${s.entryId}::${s.sessionType}`, s]))
 
   return sessions.map((session, i) => {
@@ -658,6 +659,12 @@ function seedFromGreedy(sessions, candidates, entries, rooms, mobilityMap, build
     if (roomIdx === -1) return randomGene(cand)
     return { type: 'room', roomIdx, patternIdx, startMin: hit.startMin }
   })
+}
+
+// Convert a fresh greedy generateSchedule() result into gene form.
+function seedFromGreedy(sessions, candidates, entries, rooms, mobilityMap, buildingPriorities) {
+  const { scheduled } = generateSchedule(entries, rooms, mobilityMap, buildingPriorities)
+  return seedFromScheduledRows(scheduled, sessions, candidates)
 }
 
 function geneToPlacement(gene, cand) {
@@ -908,6 +915,11 @@ function computeStaticScore(session, room, buildingPriorities) {
  * @param {string} [options.serviceUrl] - defaults to process.env.OR_TOOLS_SERVICE_URL
  *   or http://localhost:8091 for local dev.
  * @param {number} [options.maxTimeSeconds=20]
+ * @param {object[]} [options.seedSchedule] - a `scheduled` array (same shape
+ *   this function and generateSchedule()/generateScheduleGA() return) to warm
+ *   -start the solver from, instead of running a fresh greedy pass. Used by
+ *   generateScheduleHybridGAThenORTools() to have OR-Tools refine the GA's
+ *   own result rather than greedy's.
  */
 export async function generateScheduleORTools(entries, rooms, mobilityMap = {}, buildingPriorities = {}, options = {}) {
   const serviceUrl = options.serviceUrl || process.env.OR_TOOLS_SERVICE_URL || 'http://localhost:8091'
@@ -974,13 +986,15 @@ export async function generateScheduleORTools(entries, rooms, mobilityMap = {}, 
     }),
   }
 
-  // Warm-start: seed the solver with the greedy engine's own solution
-  // (converted to gene form via the same helper the GA uses) so CP-SAT
-  // always has a feasible incumbent to start from — a hard time budget can
-  // then never return UNKNOWN/no-solution the way a cold random search can
-  // on a large real-world instance, mirroring the GA's "never worse than
-  // greedy" guarantee.
-  const seedGenes = seedFromGreedy(sessions, candidates, entries, rooms, mobilityMap, buildingPriorities)
+  // Warm-start: seed the solver with a prior solution (converted to gene
+  // form via the same helper the GA uses) so CP-SAT always has a feasible
+  // incumbent to start from — a hard time budget can then never return
+  // UNKNOWN/no-solution the way a cold random search can on a large
+  // real-world instance. Defaults to a fresh greedy pass; the hybrid engine
+  // passes the GA's own result instead, so OR-Tools refines THAT.
+  const seedGenes = options.seedSchedule
+    ? seedFromScheduledRows(options.seedSchedule, sessions, candidates)
+    : seedFromGreedy(sessions, candidates, entries, rooms, mobilityMap, buildingPriorities)
   const hints = []
   seedGenes.forEach((gene, i) => {
     if (gene.type === 'none') return
@@ -1087,6 +1101,37 @@ export async function generateScheduleORTools(entries, rooms, mobilityMap = {}, 
     objectiveValue: result.objectiveValue,
     solverWallTimeSeconds: result.wallTimeSeconds,
     runtimeMs: Date.now() - startTime,
+  }
+}
+
+// ── Hybrid engine: Genetic Algorithm proposes, OR-Tools refines ──────────────
+//
+// Runs the Genetic Algorithm to completion first, then hands its result to
+// OR-Tools as a warm start instead of a fresh greedy pass. OR-Tools then
+// searches for an equal-or-better placement within its own time budget, and
+// because its hard constraints (no room/instructor/section double-booking)
+// are enforced by the CP-SAT solver itself — not a fitness penalty the way
+// the GA treats them — the final result is guaranteed conflict-free even if
+// the GA's own solution wasn't. Each engine does the part it's suited to:
+// the GA explores broadly for a good overall arrangement, OR-Tools then
+// verifies and tightens it with an exact solver's guarantee.
+export async function generateScheduleHybridGAThenORTools(entries, rooms, mobilityMap = {}, buildingPriorities = {}, options = {}) {
+  const gaResult = generateScheduleGA(entries, rooms, mobilityMap, buildingPriorities, options.ga)
+  const orResult = await generateScheduleORTools(entries, rooms, mobilityMap, buildingPriorities, {
+    ...options,
+    seedSchedule: gaResult.scheduled,
+  })
+  return {
+    ...orResult,
+    engine: 'hybrid',
+    gaStats: {
+      generationsRun: gaResult.generationsRun,
+      finalFitness:   gaResult.finalFitness,
+      hardConflicts:  gaResult.hardConflicts,
+      scheduled:      gaResult.scheduled.length,
+      unscheduled:    gaResult.unscheduled.length,
+      runtimeMs:      gaResult.runtimeMs,
+    },
   }
 }
 

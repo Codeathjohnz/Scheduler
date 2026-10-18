@@ -225,7 +225,7 @@ export default function ScheduleGenerator() {
     try {
       const r = await api.post('/scheduling/generate', { year, semester, clear_existing: true, engine })
       setLastRun(r.data)
-      const engineLabel = r.data.engine === 'genetic' ? 'Genetic Algorithm' : r.data.engine === 'ortools' ? 'Google OR-Tools' : 'Greedy'
+      const engineLabel = r.data.engine === 'genetic' ? 'Genetic Algorithm' : r.data.engine === 'ortools' ? 'Google OR-Tools' : r.data.engine === 'hybrid' ? 'Hybrid (GA + OR-Tools)' : 'Greedy'
       toast.success(`${engineLabel} engine generated ${r.data.scheduled} sessions in ${r.data.engineRuntimeMs}ms.`)
       if (r.data.unscheduled > 0) {
         toast(`${r.data.unscheduled} session(s) could not be scheduled — see warnings below.`, { icon: '⚠' })
@@ -357,6 +357,11 @@ export default function ScheduleGenerator() {
               className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='ortools'?'bg-blue-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
               OR-Tools
             </button>
+            <button type="button" onClick={()=>setEngine('hybrid')}
+              title="Hybrid — runs the Genetic Algorithm first, then has OR-Tools refine its result, combining the GA's broader search with OR-Tools' no-double-booking guarantee"
+              className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='hybrid'?'bg-teal-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
+              Hybrid (GA + OR-Tools)
+            </button>
           </div>
         </div>
         <div className="flex gap-2 ml-auto flex-wrap">
@@ -410,6 +415,12 @@ export default function ScheduleGenerator() {
             <span className="flex items-center gap-1.5 text-xs bg-blue-100 text-blue-800 font-semibold px-3 py-1.5 rounded-full"
               title="CP-SAT constraint solver — status OPTIMAL/FEASIBLE means all hard constraints (no double-booking) were satisfied by construction">
               <Cpu className="w-3.5 h-3.5"/> OR-Tools: {lastRun.solverStatus} · objective {lastRun.objectiveValue} · {lastRun.engineRuntimeMs}ms
+            </span>
+          )}
+          {lastRun?.engine === 'hybrid' && (
+            <span className="flex items-center gap-1.5 text-xs bg-teal-100 text-teal-800 font-semibold px-3 py-1.5 rounded-full"
+              title="GA proposed an arrangement, then OR-Tools refined it — the final result carries OR-Tools' no-double-booking guarantee regardless of what the GA found">
+              <Cpu className="w-3.5 h-3.5"/> GA → OR-Tools: GA {lastRun.gaStats?.generationsRun} gen. ({lastRun.gaStats?.scheduled} scheduled) → OR-Tools {lastRun.solverStatus} · {lastRun.engineRuntimeMs}ms
             </span>
           )}
         </div>

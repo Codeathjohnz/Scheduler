@@ -2,7 +2,7 @@ import { Router } from 'express'
 import pool from '../config/db.js'
 import { notify, adminIds } from '../utils/notify.js'
 import { authenticate, authorize } from '../middleware/auth.js'
-import { generateSchedule, generateScheduleGA, generateScheduleORTools, detectConflicts, minToTime, timeToMin } from '../utils/scheduler.js'
+import { generateSchedule, generateScheduleGA, generateScheduleORTools, generateScheduleHybridGAThenORTools, detectConflicts, minToTime, timeToMin } from '../utils/scheduler.js'
 
 const router = Router()
 
@@ -121,13 +121,18 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
     // many generations; 'ortools' delegates to Google OR-Tools' CP-SAT
     // constraint solver (a separate Python microservice) for a real
     // constraint-programming guarantee of no hard-constraint violations;
-    // 'greedy' (default) is the fast one-pass heuristic.
+    // 'greedy' (default) is the fast one-pass heuristic; 'hybrid' runs the
+    // Genetic Algorithm first and has OR-Tools refine its result, so each
+    // engine does the part it's suited to and the final placement carries
+    // OR-Tools' no-double-booking guarantee regardless of what the GA found.
     const engineStart = Date.now()
     let result
     if (engine === 'genetic') {
       result = generateScheduleGA(entries, rooms, mobilityMap, buildingPriorities)
     } else if (engine === 'ortools') {
       result = await generateScheduleORTools(entries, rooms, mobilityMap, buildingPriorities)
+    } else if (engine === 'hybrid') {
+      result = await generateScheduleHybridGAThenORTools(entries, rooms, mobilityMap, buildingPriorities)
     } else {
       result = generateSchedule(entries, rooms, mobilityMap, buildingPriorities)
     }
@@ -175,6 +180,12 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
         solverStatus: result.solverStatus,
         objectiveValue: result.objectiveValue,
         solverWallTimeSeconds: result.solverWallTimeSeconds,
+      } : {}),
+      ...(engine === 'hybrid' ? {
+        solverStatus: result.solverStatus,
+        objectiveValue: result.objectiveValue,
+        solverWallTimeSeconds: result.solverWallTimeSeconds,
+        gaStats: result.gaStats,
       } : {}),
     })
   } catch (err) {

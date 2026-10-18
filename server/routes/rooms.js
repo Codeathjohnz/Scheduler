@@ -22,8 +22,21 @@ function cleanProgramRestriction(val) {
   return list.length ? list.join(',') : null
 }
 
+// A stray leading/trailing space (or a doubled internal space) typed into
+// Building or Room No. makes two rows that render identically in the UI but
+// are different room_ids to the scheduler and its conflict checks — two
+// classes can then land in what looks like "the same room, same time" with
+// nothing catching it, because uq_room (building, room_number) only rejects
+// an EXACT duplicate string. Trimming here closes that off for single-room
+// add/edit the same way the bulk spreadsheet import already does.
+function cleanRoomField(val) {
+  return String(val || '').trim().replace(/\s+/g, ' ')
+}
+
 router.post('/', authenticate, authorize('admin'), async (req, res) => {
-  const { building, room_number, capacity, room_type, floor_level, is_accessible, program_restriction } = req.body
+  const building = cleanRoomField(req.body.building)
+  const room_number = cleanRoomField(req.body.room_number)
+  const { capacity, room_type, floor_level, is_accessible, program_restriction } = req.body
   try {
     const [result] = await pool.query(
       'INSERT INTO rooms (building, room_number, capacity, room_type, floor_level, is_accessible, program_restriction) VALUES (?,?,?,?,?,?,?)',
@@ -31,13 +44,18 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
     )
     res.status(201).json({ id: result.insertId })
   } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: `${building} ${room_number} already exists — edit that room instead of adding it again.` })
+    }
     res.status(500).json({ message: 'Server error.', error: err.message })
   }
 })
 
 // PUT /api/rooms/:id — edit an existing room (previously create/delete only)
 router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
-  const { building, room_number, capacity, room_type, floor_level, is_accessible, program_restriction } = req.body
+  const building = cleanRoomField(req.body.building)
+  const room_number = cleanRoomField(req.body.room_number)
+  const { capacity, room_type, floor_level, is_accessible, program_restriction } = req.body
   try {
     const [result] = await pool.query(
       `UPDATE rooms SET building=?, room_number=?, capacity=?, room_type=?, floor_level=?, is_accessible=?, program_restriction=?
@@ -49,6 +67,9 @@ router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
     }
     res.json({ message: 'Room updated.' })
   } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: `${building} ${room_number} already exists — that's a different room.` })
+    }
     res.status(500).json({ message: 'Server error.', error: err.message })
   }
 })
@@ -65,8 +86,8 @@ router.post('/bulk', authenticate, authorize('admin'), async (req, res) => {
 
   const cleaned = []
   for (const r of rooms) {
-    const building = String(r.building || '').trim()
-    const room_number = String(r.room_number || '').trim()
+    const building = cleanRoomField(r.building)
+    const room_number = cleanRoomField(r.room_number)
     if (!building || !room_number) continue
     const capacity = Math.max(1, parseInt(r.capacity, 10) || 40)
     const room_type = VALID_ROOM_TYPES.has(r.room_type) ? r.room_type : 'Lecture'
