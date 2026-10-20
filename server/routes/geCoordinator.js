@@ -4,6 +4,7 @@ import { authenticate, authorize } from '../middleware/auth.js'
 import { getCombinedLoadMap, MAX_UNITS, syncConfirmation, coordinatorPool } from './facultyload.js'
 import { creditOf } from '../utils/unitCredit.js'
 import { notify } from '../utils/notify.js'
+import { rescheduleConflicts } from '../utils/rescheduleEntries.js'
 
 /**
  * GE Coordinator — GE and PATHFIT have no department of their own; their
@@ -140,12 +141,33 @@ router.patch('/:entryId/assign', authenticate, authorize('ge_coordinator', 'admi
 
     await pool.query('UPDATE faculty_load_entries SET assigned_instructor_id = ? WHERE id = ?', [inst.id, entry.id])
     await syncConfirmation(entry.chair_id, entry.academic_year, entry.semester, inst.id)
+
+    // This subject's existing schedule (if already generated/published) can
+    // keep its day/time/room unless it now clashes with something `inst`
+    // already teaches elsewhere — same check placeholder-replace already
+    // does, needed here too since GE/PATHFIT instructors often teach across
+    // several colleges and are easy to double-book without it.
+    let scheduleNote = ''
+    try {
+      const resched = await rescheduleConflicts({
+        academicYear: entry.academic_year, semester: entry.semester,
+        movedEntryIds: [entry.id], instructorId: inst.id,
+      })
+      if (resched.rescheduled.length) {
+        scheduleNote = ` Moved to ${resched.rescheduled[0].after.join(', ') || 'a different time/room'} to avoid clashing with ${inst.name}'s existing classes.`
+      } else if (resched.unresolved.length) {
+        scheduleNote = ` Warning: this now clashes with an existing class and no open slot was found — ${resched.unresolved[0].reason}`
+      }
+    } catch (err) {
+      console.error('[ge-coordinator] reschedule failed:', err.message)
+    }
+
     await notify([entry.chair_id], {
       type: 'ge_assigned', link: '/chair/faculty-load',
       title: `${inst.name} will teach ${entry.course_code} (${entry.program_yr_sec || 'your section'})`,
-      body: 'Assigned by the GE Coordinator.',
+      body: `Assigned by the GE Coordinator.${scheduleNote}`,
     })
-    res.json({ message: `${inst.name} assigned.` })
+    res.json({ message: `${inst.name} assigned.${scheduleNote}` })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }

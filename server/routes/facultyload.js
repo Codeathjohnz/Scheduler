@@ -5,6 +5,7 @@ import { authenticate, authorize } from '../middleware/auth.js'
 import { generateFacultyLoadingDocx } from '../utils/facultyLoadingDocx.js'
 import { programKey } from '../utils/detectProgram.js'
 import { buildIflWorkbook } from '../utils/iflExcel.js'
+import { rescheduleConflicts } from '../utils/rescheduleEntries.js'
 
 const router = Router()
 
@@ -477,7 +478,33 @@ router.put('/:id', authenticate, authorize('chair', 'admin'), async (req, res) =
       [req.params.id]
     )
     if (entry) await syncConfirmation(entry.chair_id, entry.academic_year, entry.semester, entry.assigned_instructor_id)
-    res.json({ message: 'Updated.' })
+
+    // A subject already generated/published that gets handed to a different
+    // real instructor here was never checked against what that instructor
+    // already teaches elsewhere — this is the one place that was missing the
+    // same check placeholder-replace already does, which let one real
+    // instructor end up double-booked across two different subjects with
+    // nothing catching it until someone opened the conflict panel.
+    let scheduleNote = ''
+    if (instructorChanged && finalAssigned && entry) {
+      const [[newInst]] = await pool.query('SELECT name, is_placeholder FROM users WHERE id = ?', [finalAssigned])
+      if (newInst && !newInst.is_placeholder) {
+        try {
+          const resched = await rescheduleConflicts({
+            academicYear: entry.academic_year, semester: entry.semester,
+            movedEntryIds: [Number(req.params.id)], instructorId: finalAssigned,
+          })
+          if (resched.rescheduled.length) {
+            scheduleNote = ` ${resched.rescheduled[0].courseCode} was moved to ${resched.rescheduled[0].after.join(', ') || 'a different time/room'} to avoid clashing with ${newInst.name || 'their'} existing classes.`
+          } else if (resched.unresolved.length) {
+            scheduleNote = ` Warning: ${resched.unresolved[0].courseCode} now clashes with an existing class and no open slot was found — ${resched.unresolved[0].reason}`
+          }
+        } catch (err) {
+          console.error('[faculty-load] reschedule failed:', err.message)
+        }
+      }
+    }
+    res.json({ message: `Updated.${scheduleNote}` })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }

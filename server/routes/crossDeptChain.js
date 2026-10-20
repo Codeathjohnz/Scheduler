@@ -5,6 +5,7 @@ import { deanOf, chairsOf } from '../utils/deptAccess.js'
 import { getCombinedLoadMap, MAX_UNITS, syncConfirmation } from './facultyload.js'
 import { creditOf } from '../utils/unitCredit.js'
 import { notify } from '../utils/notify.js'
+import { rescheduleConflicts } from '../utils/rescheduleEntries.js'
 
 /**
  * Borrowing an instructor from another college, the full chain requested:
@@ -307,13 +308,33 @@ router.patch('/:id/respond', authenticate, authorize('instructor', 'chair', 'dea
     await log(r.id, 'instructor_accepted', req.user.id, null)
     await syncConfirmation(r.requested_by, r.academic_year, r.semester, req.user.id)
 
+    // This subject's existing schedule (if already generated/published) can
+    // keep its day/time/room unless it now clashes with something the
+    // accepting instructor already teaches in their home department —
+    // cross-department borrowing is exactly the case most likely to
+    // double-book someone, since the two sides can't see each other's load.
+    let scheduleNote = ''
+    try {
+      const resched = await rescheduleConflicts({
+        academicYear: r.academic_year, semester: r.semester,
+        movedEntryIds: [r.entry_id], instructorId: req.user.id,
+      })
+      if (resched.rescheduled.length) {
+        scheduleNote = ` Moved to ${resched.rescheduled[0].after.join(', ') || 'a different time/room'} to avoid clashing with your existing classes.`
+      } else if (resched.unresolved.length) {
+        scheduleNote = ` Warning: this now clashes with one of your existing classes and no open slot was found — ${resched.unresolved[0].reason}`
+      }
+    } catch (err) {
+      console.error('[cross-dept-chain] reschedule failed:', err.message)
+    }
+
     const recipients = [r.chair_b_id, r.dean_b_id, r.dean_a_id].filter(Boolean)
     if (recipients.length) {
-      await notify(recipients, { type: 'cross_dept_chain_result', title: `${r.instructor_name} accepted to teach ${label(r)} for ${r.requester_department}`, body: 'Finalized — forwarded up the chain.' })
+      await notify(recipients, { type: 'cross_dept_chain_result', title: `${r.instructor_name} accepted to teach ${label(r)} for ${r.requester_department}`, body: `Finalized — forwarded up the chain.${scheduleNote}` })
     }
-    await notify([r.requested_by], { type: 'cross_dept_chain_result', link: '/chair/faculty-load', title: `Finalized — ${r.instructor_name} will teach ${label(r)}`, body: 'It now appears in your Faculty Load.' })
+    await notify([r.requested_by], { type: 'cross_dept_chain_result', link: '/chair/faculty-load', title: `Finalized — ${r.instructor_name} will teach ${label(r)}`, body: `It now appears in your Faculty Load.${scheduleNote}` })
 
-    res.json({ message: 'Accepted — this is now part of your load.' })
+    res.json({ message: `Accepted — this is now part of your load.${scheduleNote}` })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }

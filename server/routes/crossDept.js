@@ -5,6 +5,7 @@ import { authenticate, authorize } from '../middleware/auth.js'
 import { getCombinedLoadMap, MAX_UNITS, TARGET_UNITS, syncConfirmation } from './facultyload.js'
 import { notify } from '../utils/notify.js'
 import { hasDeptGrant, departmentApprovers } from '../utils/deptAccess.js'
+import { rescheduleConflicts } from '../utils/rescheduleEntries.js'
 
 /**
  * Teaching for another department.
@@ -102,8 +103,27 @@ async function finalize(r, homeApproverId) {
     [homeApproverId || null, r.id]
   )
   await syncConfirmation(r.entry_chair_id, r.academic_year, r.semester, r.instructor_id)
-  await notify([r.requested_by], { type: 'teaching_request_result', link: '/chair/faculty-load', title: `${r.instructor_name} will teach ${label(r)}`, body: 'Approved by both sides — it is now assigned and counts toward their load.' })
-  await notify([r.instructor_id], { type: 'teaching_request_result', link: `/${r.instructor_role}/my-load`, title: `${label(r)} for ${r.chair_dept} is now part of your load`, body: 'Approved by your department. It appears under My Faculty Load.' })
+
+  // Same check placeholder-replace does: this subject's existing schedule
+  // can keep its day/time/room unless it now clashes with something the
+  // instructor already teaches in their home department.
+  let scheduleNote = ''
+  try {
+    const resched = await rescheduleConflicts({
+      academicYear: r.academic_year, semester: r.semester,
+      movedEntryIds: [r.entry_id], instructorId: r.instructor_id,
+    })
+    if (resched.rescheduled.length) {
+      scheduleNote = ` Moved to ${resched.rescheduled[0].after.join(', ') || 'a different time/room'} to avoid clashing with their existing classes.`
+    } else if (resched.unresolved.length) {
+      scheduleNote = ` Warning: this now clashes with an existing class and no open slot was found — ${resched.unresolved[0].reason}`
+    }
+  } catch (err) {
+    console.error('[cross-dept] reschedule failed:', err.message)
+  }
+
+  await notify([r.requested_by], { type: 'teaching_request_result', link: '/chair/faculty-load', title: `${r.instructor_name} will teach ${label(r)}`, body: `Approved by both sides — it is now assigned and counts toward their load.${scheduleNote}` })
+  await notify([r.instructor_id], { type: 'teaching_request_result', link: `/${r.instructor_role}/my-load`, title: `${label(r)} for ${r.chair_dept} is now part of your load`, body: `Approved by your department. It appears under My Faculty Load.${scheduleNote}` })
   return null
 }
 
