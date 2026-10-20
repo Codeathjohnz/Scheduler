@@ -200,7 +200,10 @@ export default function ScheduleGenerator() {
   const [dayFilter, setDayFilter] = useState('all')   // 'all' | one of DAYS — which day column(s) to show
   const [unscheduled, setUnscheduled] = useState([])
   const [showUnscheduled, setShowUnscheduled] = useState(false)
-  const [engine, setEngine] = useState('greedy')   // 'greedy' | 'genetic' | 'ortools'
+  // Hybrid (GA proposes, OR-Tools refines) is the default — it's the
+  // combined, automatic behavior the client asked for; the single-engine
+  // options stay available for when the admin wants one specifically.
+  const [engine, setEngine] = useState('hybrid')   // 'hybrid' | 'greedy' | 'genetic' | 'ortools'
   const [lastRun, setLastRun] = useState(null)      // stats from the most recent generate call
 
   const fetchSchedules = async () => {
@@ -341,27 +344,32 @@ export default function ScheduleGenerator() {
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-600 mb-1">Engine</label>
-          <div className="flex border-2 border-gray-200 rounded-xl overflow-hidden">
-            <button type="button" onClick={()=>setEngine('greedy')}
-              title="Fast constructive heuristic — one pass, near-instant"
-              className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='greedy'?'bg-green-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
-              Greedy (Fast)
-            </button>
-            <button type="button" onClick={()=>setEngine('genetic')}
-              title="Genetic Algorithm — evolves complete candidate schedules over many generations, may find a better arrangement at the cost of runtime"
-              className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='genetic'?'bg-purple-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
-              Genetic Algorithm
-            </button>
-            <button type="button" onClick={()=>setEngine('ortools')}
-              title="Google OR-Tools (CP-SAT) — constraint-programming solver, guarantees no room/instructor/section double-booking by construction"
-              className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='ortools'?'bg-blue-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
-              OR-Tools
-            </button>
+          <div className="flex items-center gap-3 flex-wrap">
             <button type="button" onClick={()=>setEngine('hybrid')}
-              title="Hybrid — runs the Genetic Algorithm first, then has OR-Tools refine its result, combining the GA's broader search with OR-Tools' no-double-booking guarantee"
-              className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='hybrid'?'bg-teal-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
-              Hybrid (GA + OR-Tools)
+              title="Default — runs the Genetic Algorithm first, then has OR-Tools refine its result: the GA's broader search combined with OR-Tools' no-double-booking guarantee, automatically"
+              className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold transition border-2 ${engine==='hybrid'?'bg-teal-700 border-teal-700 text-white':'bg-teal-50 border-teal-200 text-teal-800 hover:border-teal-400'}`}>
+              Hybrid (GA + OR-Tools) <span className="font-normal opacity-80">· Default</span>
             </button>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Advanced:</span>
+              <div className="flex border-2 border-gray-200 rounded-xl overflow-hidden">
+                <button type="button" onClick={()=>setEngine('greedy')}
+                  title="Fast constructive heuristic — one pass, near-instant"
+                  className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='greedy'?'bg-green-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                  Greedy (Fast)
+                </button>
+                <button type="button" onClick={()=>setEngine('genetic')}
+                  title="Genetic Algorithm only — evolves complete candidate schedules over many generations, may find a better arrangement at the cost of runtime"
+                  className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='genetic'?'bg-purple-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                  Genetic Algorithm
+                </button>
+                <button type="button" onClick={()=>setEngine('ortools')}
+                  title="OR-Tools only — constraint-programming solver, guarantees no room/instructor/section double-booking by construction, without the GA's broader search first"
+                  className={`px-3 py-2.5 text-xs font-semibold transition ${engine==='ortools'?'bg-blue-700 text-white':'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                  OR-Tools
+                </button>
+              </div>
+            </div>
           </div>
         </div>
         <div className="flex gap-2 ml-auto flex-wrap">

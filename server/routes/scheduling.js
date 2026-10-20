@@ -42,7 +42,7 @@ router.get('/', authenticate, async (req, res) => {
 
 // ── POST /api/scheduling/generate ────────────────────────────────────────────
 router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
-  const { year = '2026-2027', semester = 1, clear_existing = true, engine = 'greedy' } = req.body
+  const { year = '2026-2027', semester = 1, clear_existing = true, engine = 'hybrid' } = req.body
   try {
     // A published term is final: it's recorded in Transaction History, and
     // generating again would replace it.
@@ -116,15 +116,13 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
       buildingPriorities[row.building][row.program] = row.priority
     }
 
-    // Run the scheduling engine — 'genetic' evolves complete candidate
-    // schedules toward fewer conflicts/higher soft-constraint scores over
-    // many generations; 'ortools' delegates to Google OR-Tools' CP-SAT
-    // constraint solver (a separate Python microservice) for a real
-    // constraint-programming guarantee of no hard-constraint violations;
-    // 'greedy' (default) is the fast one-pass heuristic; 'hybrid' runs the
-    // Genetic Algorithm first and has OR-Tools refine its result, so each
-    // engine does the part it's suited to and the final placement carries
-    // OR-Tools' no-double-booking guarantee regardless of what the GA found.
+    // Run the scheduling engine — 'hybrid' (default) runs the Genetic
+    // Algorithm first and has OR-Tools refine its result, so each engine
+    // does the part it's suited to and the final placement carries OR-Tools'
+    // no-double-booking guarantee regardless of what the GA found on its
+    // own. 'genetic' and 'ortools' run either engine alone; 'greedy' is the
+    // fast one-pass heuristic. The three single-engine options stay
+    // available as advanced alternatives.
     const engineStart = Date.now()
     let result
     if (engine === 'genetic') {
