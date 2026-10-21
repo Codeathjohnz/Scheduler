@@ -28,6 +28,23 @@ function timeToMin(t) {
   return h * 60 + m
 }
 
+function timeRangesOverlap(aStart, aEnd, bStart, bEnd) {
+  return timeToMin(aStart) < timeToMin(bEnd) && timeToMin(bStart) < timeToMin(aEnd)
+}
+function daysOverlap(aDays, bDaysCsv) {
+  const bDays = bDaysCsv.split(',').map(d => d.trim())
+  return aDays.some(d => bDays.includes(d))
+}
+function fmt12(t) {
+  const [h, m] = (t || '00:00').split(':').map(Number)
+  const suffix = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 || 12
+  return `${h12}:${String(m).padStart(2,'0')} ${suffix}`
+}
+function fmt12Range(start, end) {
+  return `${fmt12(start)}–${fmt12(end)}`
+}
+
 // Stable color from a string (instructor name or section)
 function strColor(str) {
   let h = 0
@@ -54,7 +71,7 @@ function deptColor(dept) {
 }
 
 /* ── edit modal ─────────────────────────────────────────────────────────────── */
-function EditModal({ slot, rooms, onSave, onClose }) {
+function EditModal({ slot, rooms, allSchedules, onSave, onClose }) {
   const [form, setForm] = useState({
     room_id:    slot.room_id || '',
     days:       slot.days,
@@ -85,6 +102,22 @@ function EditModal({ slot, rooms, onSave, onClose }) {
       : [...currentDays, day]
     setForm(f => ({ ...f, days: days.join(',') }))
   }
+
+  // Transparency: for whichever day(s)/time are currently picked, which
+  // rooms are actually free right now — computed live from the term's own
+  // schedule (already loaded), not a guess. Gym rooms are shared by design
+  // (several PATHFIT sections run in one at once), so never "busy" here.
+  const hasTime = form.start_time && form.end_time && form.start_time < form.end_time
+  const busyByRoom = new Map()
+  if (hasTime && currentDays.length) {
+    for (const s of allSchedules) {
+      if (s.id === slot.id || !s.room_id || s.room_type === 'Gym') continue
+      if (!daysOverlap(currentDays, s.days)) continue
+      if (!timeRangesOverlap(form.start_time, form.end_time, s.start_time?.slice(0,5), s.end_time?.slice(0,5))) continue
+      if (!busyByRoom.has(s.room_id)) busyByRoom.set(s.room_id, s)
+    }
+  }
+  const freeCount = rooms.length - busyByRoom.size
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -133,7 +166,14 @@ function EditModal({ slot, rooms, onSave, onClose }) {
 
           {/* Room */}
           <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Room</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-semibold text-gray-600">Room</label>
+              {hasTime && currentDays.length > 0 && (
+                <span className={`text-[11px] font-semibold ${freeCount > 0 ? 'text-green-700' : 'text-red-600'}`}>
+                  {freeCount} of {rooms.length} free at this day/time
+                </span>
+              )}
+            </div>
             <select value={form.room_id} onChange={e=>setForm(f=>({...f,room_id:e.target.value}))}
               className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-green-500 bg-white">
               <option value="">— No room —</option>
@@ -142,7 +182,11 @@ function EditModal({ slot, rooms, onSave, onClose }) {
                 if (!rms.length) return null
                 return (
                   <optgroup key={type} label={type === 'Laboratory' ? 'Laboratory (LAB — lab classes only)' : type === 'Lecture' ? 'Lecture (LEC)' : type}>
-                    {rms.map(r => <option key={r.id} value={r.id}>{r.building} {r.room_number} [{roomTypeShort(r.room_type)}] (cap {r.capacity})</option>)}
+                    {rms.map(r => {
+                      const busy = busyByRoom.get(r.id)
+                      const label = `${r.building} ${r.room_number} [${roomTypeShort(r.room_type)}] (cap ${r.capacity})${busy ? ` — busy: ${busy.course_code} ${fmt12Range(busy.start_time, busy.end_time)}` : ''}`
+                      return <option key={r.id} value={r.id} disabled={!!busy && r.id !== Number(form.room_id)}>{label}</option>
+                    })}
                   </optgroup>
                 )
               })}
@@ -711,6 +755,7 @@ export default function ScheduleGenerator() {
         <EditModal
           slot={editSlot}
           rooms={rooms}
+          allSchedules={schedules}
           onSave={() => { setEditSlot(null); fetchSchedules() }}
           onClose={() => setEditSlot(null)}
         />

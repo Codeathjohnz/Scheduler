@@ -28,6 +28,19 @@ function fmt12(t) {
   return `${h12}:${String(m).padStart(2,'0')} ${suffix}`
 }
 
+// "1h", "1h 30m", "3h" — how many hours a session actually consumes.
+function fmtMinutes(mins) {
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  if (h <= 0) return `${m}m`
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+function fmtDuration(startTime, endTime) {
+  return fmtMinutes(timeToMin(endTime) - timeToMin(startTime))
+}
+
+const typeLabel = (sessionType) => sessionType === 'lab' ? 'LAB' : 'LEC'
+
 // Stable color per subject code
 function subjectColor(code) {
   let h = 0
@@ -41,14 +54,18 @@ function Block({ slot, lane = { col: 0, cols: 1 } }) {
   const colors = subjectColor(slot.course_code)
   const top    = (timeToMin(slot.start_time) - GRID_START) * PX_PER_MIN
   const height = (timeToMin(slot.end_time) - timeToMin(slot.start_time)) * PX_PER_MIN - 2
+  const duration = fmtDuration(slot.start_time, slot.end_time)
+  const type = typeLabel(slot.session_type)
 
   return (
     <div className="absolute rounded-lg px-1.5 py-1 overflow-hidden"
       style={{ top, height, minHeight: 24, left: `calc(${lane.col / lane.cols * 100}% + 2px)`, width: `calc(${100 / lane.cols}% - 4px)`, background: colors.bg, borderLeft: `3px solid ${colors.border}` }}
-      title={`${slot.course_code} — ${slot.instructor_name || 'TBA'}\n${slot.room_name || 'No room'}\n${fmt12(slot.start_time)} – ${fmt12(slot.end_time)}`}
+      title={`${slot.course_code} — ${slot.instructor_name || 'TBA'}\n${type} · ${duration}\n${slot.room_name || 'No room'}\n${fmt12(slot.start_time)} – ${fmt12(slot.end_time)}`}
     >
-      <p className="font-bold text-[10px] leading-tight truncate" style={{ color: colors.text }}>{slot.course_code}</p>
-      {height > 30 && <p className="text-[9px] leading-tight truncate opacity-80" style={{ color: colors.text }}>{slot.instructor_name || slot.session_type}</p>}
+      <p className="font-bold text-[10px] leading-tight truncate" style={{ color: colors.text }}>
+        {slot.course_code} <span className="font-semibold opacity-70">{type}</span>
+      </p>
+      {height > 30 && <p className="text-[9px] leading-tight truncate opacity-80" style={{ color: colors.text }}>{slot.instructor_name || type} · {duration}</p>}
       {height > 44 && <p className="text-[9px] leading-tight truncate opacity-70" style={{ color: colors.text }}>{slot.room_name || '—'}{slot.room_type ? ` · ${roomTypeShort(slot.room_type)}` : ''}{roomMismatch(slot) ? ' ⚠' : ''}</p>}
     </div>
   )
@@ -207,8 +224,8 @@ export default function StudentSchedule() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2 flex-wrap">
                     <span className="font-bold text-gray-800">{s.course_code}</span>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${s.session_type === 'lab' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                      {s.session_type}
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.session_type === 'lab' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                      {typeLabel(s.session_type)}
                     </span>
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5 truncate">{s.descriptive_title}</p>
@@ -222,6 +239,7 @@ export default function StudentSchedule() {
                     <Clock className="w-3.5 h-3.5 text-gray-400" />
                     {s.days.split(',').map(d => DAY_SHORT[d.trim()]).join('/')} &nbsp;
                     {fmt12(s.start_time)} – {fmt12(s.end_time)}
+                    <span className="font-semibold text-gray-600">({fmtDuration(s.start_time, s.end_time)})</span>
                   </span>
                   <span className="flex items-center gap-1.5">
                     <DoorOpen className="w-3.5 h-3.5 text-gray-400" />
@@ -241,16 +259,20 @@ export default function StudentSchedule() {
           <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Subject Summary</p>
           <div className="space-y-2">
             {subjects.map(s => {
-              const days = [...new Set(
-                schedules
-                  .filter(x => x.faculty_entry_id === s.faculty_entry_id)
-                  .flatMap(x => x.days.split(',').map(d => d.trim()))
-              )]
+              const rows = schedules.filter(x => x.faculty_entry_id === s.faculty_entry_id)
+              const days = [...new Set(rows.flatMap(x => x.days.split(',').map(d => d.trim())))]
+              // Total clock hours/week this subject actually takes — a row
+              // meeting several days counts once per day it meets.
+              const weeklyMinutes = rows.reduce((sum, x) =>
+                sum + (timeToMin(x.end_time) - timeToMin(x.start_time)) * x.days.split(',').length, 0)
+              const types = [...new Set(rows.map(x => typeLabel(x.session_type)))]
               return (
                 <div key={s.faculty_entry_id} className="flex items-center gap-3 text-sm">
                   <BookOpen className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                   <span className="font-semibold text-gray-700 min-w-[100px]">{s.course_code}</span>
+                  <span className="text-[10px] font-semibold text-gray-400">{types.join('+')}</span>
                   <span className="text-gray-500 flex-1 truncate">{s.instructor_name || 'TBA'}</span>
+                  <span className="text-xs font-semibold text-gray-600">{fmtMinutes(weeklyMinutes)}/wk</span>
                   <span className="text-xs text-gray-400">{days.map(d => DAY_SHORT[d]).join(' / ')}</span>
                 </div>
               )
