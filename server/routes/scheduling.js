@@ -3,6 +3,7 @@ import pool from '../config/db.js'
 import { notify, adminIds } from '../utils/notify.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { generateSchedule, generateScheduleGA, generateScheduleORTools, generateScheduleHybridGAThenORTools, detectConflicts, minToTime, timeToMin } from '../utils/scheduler.js'
+import { suggestFixForConflict } from '../utils/rescheduleEntries.js'
 
 const router = Router()
 
@@ -35,6 +36,21 @@ router.get('/', authenticate, async (req, res) => {
       schedules: rows.map(r => ({ ...r, hasConflict: conflictIds.has(r.id) })),
       conflicts,
     })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+// ── POST /api/scheduling/suggest-fix ──────────────────────────────────────────
+// "Suggest a fix" from the Conflict panel — re-slots one side of a conflict
+// around everything else currently scheduled (its conflict partner included)
+// and applies it immediately, same as reassigning an instructor already does.
+router.post('/suggest-fix', authenticate, authorize('admin'), async (req, res) => {
+  const { year, semester, entryId } = req.body
+  if (!year || !semester || !entryId) return res.status(400).json({ message: 'year, semester, and entryId are required.' })
+  try {
+    const result = await suggestFixForConflict({ academicYear: year, semester: Number(semester), entryId: Number(entryId) })
+    res.json(result)
   } catch (err) {
     res.status(500).json({ message: err.message })
   }

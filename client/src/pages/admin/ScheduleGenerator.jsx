@@ -244,6 +244,7 @@ export default function ScheduleGenerator() {
   const [dayFilter, setDayFilter] = useState('all')   // 'all' | one of DAYS — which day column(s) to show
   const [unscheduled, setUnscheduled] = useState([])
   const [showUnscheduled, setShowUnscheduled] = useState(false)
+  const [fixingEntryId, setFixingEntryId] = useState(null) // which "Suggest a fix" is in flight
   // Hybrid (GA proposes, OR-Tools refines) is the default — it's the
   // combined, automatic behavior the client asked for; the single-engine
   // options stay available for when the admin wants one specifically.
@@ -282,6 +283,23 @@ export default function ScheduleGenerator() {
       fetchSchedules()
     } catch (err) { toast.error(err.response?.data?.message || 'Generation failed.') }
     finally { setGenerating(false) }
+  }
+
+  // "Suggest a fix" — re-slots one side of a conflict around everything else
+  // currently scheduled and applies it immediately, instead of the admin
+  // having to find a free room/time manually.
+  const handleSuggestFix = async (entryId) => {
+    setFixingEntryId(entryId)
+    try {
+      const r = await api.post('/scheduling/suggest-fix', { year, semester, entryId })
+      if (r.data.applied) {
+        toast.success(`${r.data.courseCode} moved to ${r.data.after.join(', ')}.`, { duration: 6000 })
+        fetchSchedules()
+      } else {
+        toast.error(`Couldn't fix ${r.data.courseCode || 'this subject'} automatically — ${r.data.reason}`, { duration: 7000 })
+      }
+    } catch (err) { toast.error(err.response?.data?.message || 'Could not suggest a fix.') }
+    finally { setFixingEntryId(null) }
   }
 
   const handlePublish = async () => {
@@ -485,9 +503,22 @@ export default function ScheduleGenerator() {
             <AlertTriangle className="w-4 h-4 text-red-600"/>
             <span className="font-bold text-red-700 text-sm">Scheduling Conflicts Detected</span>
           </div>
-          <div className="px-4 py-3 space-y-1">
+          <div className="px-4 py-3 space-y-2">
             {conflicts.map((c, i) => (
-              <p key={i} className="text-xs text-red-700">• {c.message}</p>
+              <div key={i} className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-red-700">• {c.message}</p>
+                {c.entryIds && (
+                  <div className="flex gap-1.5 shrink-0">
+                    {c.entryIds.map((entryId, j) => (
+                      <button key={j} onClick={() => handleSuggestFix(entryId)} disabled={fixingEntryId !== null}
+                        className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-white border border-red-300 text-red-700 hover:bg-red-100 disabled:opacity-50 transition">
+                        {fixingEntryId === entryId ? <Loader2 className="w-3 h-3 animate-spin"/> : <Cpu className="w-3 h-3"/>}
+                        Suggest a fix for {c.courseCodes[j]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </div>

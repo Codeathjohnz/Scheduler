@@ -1151,10 +1151,16 @@ export function detectConflicts(rows) {
       const bStart = timeToMin(b.start_time); const bEnd = timeToMin(b.end_time)
       if (!timeOverlap(aStart, aEnd - aStart, bStart, bEnd - bStart)) continue
 
+      // entryIds/courseCodes let the UI offer "Suggest a fix" for either side
+      // of the conflict — whichever subject the admin picks gets re-slotted
+      // around everything else, including its conflict partner.
+      const entryIds = [a.faculty_entry_id, b.faculty_entry_id]
+      const courseCodes = [a.course_code, b.course_code]
+
       // Gym rooms are shared — multiple PATHFIT sections at the same time is expected, not a conflict.
       if (a.room_id && a.room_id === b.room_id && a.room_type !== 'Gym') {
         conflicts.push({
-          type: 'room', ids: [a.id, b.id],
+          type: 'room', ids: [a.id, b.id], entryIds, courseCodes,
           message: `Room conflict: ${a.room_name} used by "${a.course_code}" and "${b.course_code}" at the same time`,
         })
       }
@@ -1164,13 +1170,13 @@ export function detectConflicts(rows) {
       // be double-booked.
       if (a.instructor_id && a.instructor_id === b.instructor_id && !a.instructor_is_placeholder) {
         conflicts.push({
-          type: 'instructor', ids: [a.id, b.id],
+          type: 'instructor', ids: [a.id, b.id], entryIds, courseCodes,
           message: `Instructor conflict: ${a.instructor_name} assigned to "${a.course_code}" and "${b.course_code}" at the same time`,
         })
       }
       if (a.program_yr_sec && a.program_yr_sec === b.program_yr_sec) {
         conflicts.push({
-          type: 'section', ids: [a.id, b.id],
+          type: 'section', ids: [a.id, b.id], entryIds, courseCodes,
           message: `Section conflict: ${a.program_yr_sec} has "${a.course_code}" and "${b.course_code}" at the same time`,
         })
       }

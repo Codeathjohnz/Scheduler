@@ -122,3 +122,74 @@ export async function rescheduleConflicts({ academicYear, semester, movedEntryId
   }
   return { checked: movedRows.length, rescheduled, unresolved }
 }
+
+/**
+ * "Suggest a fix" for one side of a conflict the admin is looking at in the
+ * Conflict panel — re-slot just that one subject's sessions around every
+ * other currently-scheduled session (its conflict partner included), the
+ * same way rescheduleConflicts() does, but triggered directly from a
+ * conflict instead of from an instructor reassignment. Applies immediately
+ * (consistent with how reassignment already auto-resolves a clash) rather
+ * than a separate preview/confirm step.
+ *
+ * @param {{ academicYear: string, semester: number, entryId: number }} args
+ * @returns {{ applied: boolean, courseCode: string, section: string, before: string[], after: string[], reason?: string }}
+ */
+export async function suggestFixForConflict({ academicYear, semester, entryId }) {
+  const [rows] = await pool.query(
+    `SELECT gs.*, fle.program_yr_sec, fle.assigned_instructor_id AS instructor_id, fle.course_code
+     FROM generated_schedules gs
+     JOIN faculty_load_entries fle ON fle.id = gs.faculty_entry_id
+     WHERE gs.academic_year = ? AND gs.semester = ?`,
+    [academicYear, semester]
+  )
+  const placements = rows.map(toPlacement)
+  const before = placements.filter(p => p.entryId === entryId)
+  if (!before.length) return { applied: false, reason: 'This subject has no generated schedule to move.' }
+
+  const [[entry]] = await pool.query(
+    `SELECT fle.*, u.name AS instructor_name, u.is_placeholder AS is_placeholder, chair.department AS dept, p.program AS program
+     FROM faculty_load_entries fle
+     LEFT JOIN users u ON fle.assigned_instructor_id = u.id
+     LEFT JOIN users chair ON fle.chair_id = chair.id
+     LEFT JOIN prospectus_subjects ps ON fle.subject_id = ps.id
+     LEFT JOIN prospectus p ON ps.prospectus_id = p.id
+     WHERE fle.id = ?`, [entryId]
+  )
+  if (!entry) return { applied: false, reason: 'Subject not found.' }
+
+  const [rooms] = await pool.query('SELECT * FROM rooms ORDER BY room_type, floor_level, id')
+  const roomNames = new Map(rooms.map(r => [r.id, `${r.building} ${r.room_number}`]))
+  const [[inst]] = await pool.query('SELECT mobility_level FROM users WHERE id = ?', [entry.assigned_instructor_id || 0])
+  const mobilityMap = entry.assigned_instructor_id ? { [entry.assigned_instructor_id]: inst?.mobility_level ?? 3 } : {}
+  const [priorityRows] = await pool.query('SELECT building, program, priority FROM building_priorities ORDER BY building, priority')
+  const buildingPriorities = {}
+  for (const r of priorityRows) (buildingPriorities[r.building] ||= {})[r.program] = r.priority
+
+  // Everything else — the conflict partner included — stays exactly where it is.
+  const fixed = placements.filter(p => p.entryId !== entryId).map(p => ({
+    entryId: p.entryId, instructorId: p.instructorId, programYrSec: p.programYrSec, roomId: p.roomId,
+    daysMask: p.daysMask, startMin: p.startMin, durationMin: p.durationMin, days: p.days, sessionType: p.sessionType,
+  }))
+
+  const { scheduled, unscheduled } = generateSchedule([entry], rooms, mobilityMap, buildingPriorities, fixed)
+  const label = { courseCode: entry.course_code, section: entry.program_yr_sec }
+  if (!scheduled.length) {
+    return { applied: false, ...label, reason: unscheduled[0]?.reason || 'No open room/time slot found for this subject.' }
+  }
+
+  const wasPublished = before.some(b => Number(b.row.is_published) === 1) ? 1 : 0
+  await pool.query('DELETE FROM generated_schedules WHERE faculty_entry_id = ?', [entryId])
+  await pool.query(
+    `INSERT INTO generated_schedules
+       (academic_year, semester, faculty_entry_id, session_type, room_id, days, start_time, end_time, is_manual, is_published)
+     VALUES ?`,
+    [scheduled.map(s => [academicYear, semester, entryId, s.sessionType, s.roomId, s.days.join(','), s.startTime, s.endTime, 1, wasPublished])]
+  )
+
+  return {
+    applied: true, ...label,
+    before: before.map(b => describe(b.row, roomNames)),
+    after: scheduled.map(s => `${s.days.map(d => d.slice(0, 3)).join('/')} ${s.startTime}–${s.endTime} · ${s.isOnline ? 'Online' : s.roomName}`),
+  }
+}
