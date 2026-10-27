@@ -101,33 +101,18 @@ function hasAnyValidStart(patterns) {
 
 // ── meeting patterns per entry ────────────────────────────────────────────────
 
+// Every lecture subject meets once a week for a flat 2-hour block, regardless
+// of its lec_hours unit count — an explicit institutional policy choice, not
+// a derivation from credit hours (lec_hours still drives unit credit and
+// load-sheet totals elsewhere; it no longer determines meeting duration).
+const LECTURE_DURATION_MIN = 120
+
 function buildPatterns(lecHours, labHours) {
   const sessions = []
 
   if (Number(lecHours) > 0) {
-    const lec = Number(lecHours)
-    let patterns = []
-    if (lec === 3) {
-      patterns = [
-        { days: ['Monday', 'Wednesday', 'Friday'], durationMin: 60 },
-        { days: ['Tuesday', 'Thursday'],           durationMin: 90 },
-      ]
-    } else if (lec === 2) {
-      patterns = [
-        { days: ['Tuesday', 'Thursday'],  durationMin: 60 },
-        { days: ['Monday', 'Wednesday'],  durationMin: 60 },
-        { days: ['Wednesday', 'Friday'],  durationMin: 60 },
-      ]
-    } else if (lec === 1.5) {
-      patterns = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
-        .map(d => ({ days: [d], durationMin: 90 }))
-    } else if (lec === 1) {
-      patterns = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
-        .map(d => ({ days: [d], durationMin: 60 }))
-    } else {
-      patterns = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
-        .map(d => ({ days: [d], durationMin: lec * 60 }))
-    }
+    const patterns = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+      .map(d => ({ days: [d], durationMin: LECTURE_DURATION_MIN }))
     sessions.push({ sessionType: 'lecture', roomType: 'Lecture', patterns })
   }
 

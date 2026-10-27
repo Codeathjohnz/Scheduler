@@ -6,7 +6,7 @@ import api from '../../services/api.js'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import {
   Cpu, Printer, AlertTriangle, CheckCircle2,
-  Loader2, X, Edit2, Globe, Trash2, RotateCcw
+  Loader2, X, Edit2, Globe, Trash2, RotateCcw, DoorOpen, ChevronDown, ChevronUp
 } from 'lucide-react'
 import RoomTypeBadge, { roomTypeShort, roomMismatch } from '../../components/common/RoomTypeBadge.jsx'
 
@@ -202,6 +202,95 @@ function EditModal({ slot, rooms, allSchedules, onSave, onClose }) {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+/* ── room availability panel ───────────────────────────────────────────────── */
+// Always visible — not buried inside the edit modal — so the admin can check
+// "is anything free at this day/time" on its own, before or after generating,
+// not only while already resolving a conflict.
+function RoomAvailabilityPanel({ rooms, schedules }) {
+  const [open, setOpen] = useState(true)
+  const [day, setDay] = useState('Monday')
+  const [startTime, setStartTime] = useState('08:00')
+  const [endTime, setEndTime] = useState('09:00')
+
+  const hasTime = startTime && endTime && startTime < endTime
+  const busyByRoom = new Map()
+  if (hasTime) {
+    for (const s of schedules) {
+      if (!s.room_id || s.room_type === 'Gym') continue
+      if (!daysOverlap([day], s.days)) continue
+      if (!timeRangesOverlap(startTime, endTime, s.start_time?.slice(0,5), s.end_time?.slice(0,5))) continue
+      if (!busyByRoom.has(s.room_id)) busyByRoom.set(s.room_id, s)
+    }
+  }
+  const freeCount = rooms.length - busyByRoom.size
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm mb-4 overflow-hidden">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition">
+        <span className="font-bold text-sm text-gray-800 flex items-center gap-2">
+          <DoorOpen className="w-4 h-4 text-gray-500" /> Room Availability
+        </span>
+        {open ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+      </button>
+      {open && (
+        <div className="px-5 pb-5 pt-1 border-t border-gray-100">
+          <div className="flex flex-wrap items-end gap-3 mb-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Day</label>
+              <select value={day} onChange={e=>setDay(e.target.value)}
+                className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-green-500">
+                {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Start Time</label>
+              <input type="time" value={startTime} onChange={e=>setStartTime(e.target.value)}
+                className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">End Time</label>
+              <input type="time" value={endTime} onChange={e=>setEndTime(e.target.value)}
+                className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
+            </div>
+          </div>
+
+          {rooms.length === 0 ? (
+            <p className="text-sm text-gray-400">No rooms set up yet — add some in Manage Rooms.</p>
+          ) : !hasTime ? (
+            <p className="text-sm text-gray-400">Pick a start time earlier than the end time.</p>
+          ) : freeCount === 0 ? (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-2 text-red-700 text-sm font-semibold mb-3">
+              <AlertTriangle className="w-4 h-4 shrink-0" /> No rooms available — every room is already in use {day} {fmt12Range(startTime, endTime)}.
+            </div>
+          ) : (
+            <p className="text-sm text-green-700 font-semibold mb-3">
+              {freeCount} of {rooms.length} rooms available {day} {fmt12Range(startTime, endTime)}.
+            </p>
+          )}
+
+          {hasTime && rooms.length > 0 && (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {rooms.map(r => {
+                const busy = busyByRoom.get(r.id)
+                return (
+                  <div key={r.id} title={busy ? `${busy.course_code} · ${fmt12Range(busy.start_time?.slice(0,5), busy.end_time?.slice(0,5))}` : undefined}
+                    className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs ${busy ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+                    <span className="font-semibold text-gray-700 truncate">{r.building} {r.room_number}</span>
+                    {busy
+                      ? <span className="text-red-600 font-bold shrink-0">Busy · {busy.course_code}</span>
+                      : <span className="text-green-700 font-bold shrink-0">Free</span>}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -457,6 +546,8 @@ export default function ScheduleGenerator() {
           </>}
         </div>
       </div>
+
+      <RoomAvailabilityPanel rooms={rooms} schedules={schedules} />
 
       {/* Status chips */}
       {schedules.length > 0 && !isPublished && (
