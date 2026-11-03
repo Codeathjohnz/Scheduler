@@ -14,7 +14,7 @@ router.get('/', authenticate, async (req, res) => {
   try {
     const [rows] = await pool.query(`
       SELECT gs.*,
-        r.building, r.room_number, r.room_type,
+        r.building, r.room_number, r.room_type, r.floor_level,
         COALESCE(CONCAT(r.building, ' ', r.room_number), 'Online Class') AS room_name,
         fle.course_code, fle.descriptive_title, fle.units,
         fle.lec_hours, fle.lab_hours, fle.program_yr_sec,
@@ -403,7 +403,7 @@ router.get('/dept', authenticate, authorize('chair'), async (req, res) => {
   try {
     const [rows] = await pool.query(`
       SELECT gs.*,
-        r.building, r.room_number, r.room_type,
+        r.building, r.room_number, r.room_type, r.floor_level,
         COALESCE(CONCAT(r.building, ' ', r.room_number), 'Online Class') AS room_name,
         fle.course_code, fle.descriptive_title, fle.units,
         fle.lec_hours, fle.lab_hours, fle.program_yr_sec,
@@ -430,7 +430,7 @@ router.get('/my', authenticate, async (req, res) => {
     const [rows] = await pool.query(`
       SELECT gs.*,
         COALESCE(CONCAT(r.building, ' ', r.room_number), 'Online Class') AS room_name,
-        r.building, r.room_number, r.room_type,
+        r.building, r.room_number, r.room_type, r.floor_level,
         fle.course_code, fle.descriptive_title, fle.units,
         fle.lec_hours, fle.lab_hours, fle.program_yr_sec
       FROM generated_schedules gs
@@ -455,7 +455,7 @@ router.get('/my-section', authenticate, authorize('student'), async (req, res) =
     const [rows] = await pool.query(`
       SELECT gs.*,
         COALESCE(CONCAT(r.building, ' ', r.room_number), 'Online Class') AS room_name,
-        r.building, r.room_number, r.room_type,
+        r.building, r.room_number, r.room_type, r.floor_level,
         fle.course_code, fle.descriptive_title, fle.units,
         fle.lec_hours, fle.lab_hours, fle.program_yr_sec,
         u.name AS instructor_name

@@ -10,6 +10,15 @@ import RoomTypeBadge from './RoomTypeBadge.jsx'
 const DAY_ORDER = { Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 }
 const DAY_SHORT = { Monday: 'Mon', Tuesday: 'Tue', Wednesday: 'Wed', Thursday: 'Thu', Friday: 'Fri', Saturday: 'Sat' }
 
+// "1st Floor", "2nd Floor", "3rd Floor", "4th Floor", ...
+function ordinalFloor(n) {
+  const v = Number(n)
+  if (!v || v < 1) return null
+  const mod100 = v % 100
+  const suffix = (mod100 >= 11 && mod100 <= 13) ? 'th' : ['th','st','nd','rd'][v % 10] || 'th'
+  return `${v}${suffix} Floor`
+}
+
 const hhmm = (t) => String(t || '').slice(0, 5)
 const fmt = (t) => {
   const [h, m] = hhmm(t).split(':').map(Number)
@@ -89,6 +98,11 @@ export function ScheduleGroups({ rows, mode }) {
                     <DoorOpen className="w-4 h-4 text-gray-400" />
                     <p className="font-semibold text-sm text-gray-800">{room}</p>
                     <RoomTypeBadge type={sessions[0].room_type} />
+                    {ordinalFloor(sessions[0].floor_level) && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                        {ordinalFloor(sessions[0].floor_level)}
+                      </span>
+                    )}
                   </div>
                   <table className="w-full rounded-lg overflow-hidden border border-gray-100">
                     <tbody>
