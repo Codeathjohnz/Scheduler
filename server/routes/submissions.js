@@ -542,6 +542,7 @@ router.get('/:id/entries', authenticate, authorize('vpaa', 'admin', 'chair', 'de
     if (!sub) return res.status(404).json({ message: 'Submission not found.' })
 
     if (sub.submission_type === 'faculty_load') {
+      const [[chair]] = await pool.query('SELECT name, department FROM users WHERE id = ?', [sub.chair_id])
       const [entries] = await pool.query(`
         SELECT fle.*,
           u.name       AS instructor_name,
@@ -551,7 +552,20 @@ router.get('/:id/entries', authenticate, authorize('vpaa', 'admin', 'chair', 'de
         WHERE fle.chair_id = ? AND fle.academic_year = ? AND fle.semester = ?
         ORDER BY u.name, fle.sort_order, fle.id
       `, [sub.chair_id, sub.academic_year, sub.semester])
-      return res.json({ type: 'faculty_load', academic_year: sub.academic_year, semester: sub.semester, entries })
+      // Non-teaching load (Administrative/Research/Extension/Project/Consultation/
+      // Lesson Prep) — same query shape as the chair's own Faculty Load fetch, so
+      // the Faculty Loading Sheet reviewers see here matches what the chair built.
+      const [adminLoads] = await pool.query(`
+        SELECT fal.*, u.name AS instructor_name
+        FROM faculty_admin_loads fal
+        JOIN users u ON fal.instructor_id = u.id
+        WHERE fal.academic_year = ? AND fal.semester = ? AND fal.chair_id = ?
+      `, [sub.academic_year, sub.semester, sub.chair_id])
+      return res.json({
+        type: 'faculty_load', academic_year: sub.academic_year, semester: sub.semester,
+        chair_name: chair?.name, chair_dept: chair?.department,
+        entries, adminLoads,
+      })
     }
 
     const [entries] = await pool.query(`

@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import toast from 'react-hot-toast'
-import { CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2, ClipboardList, Search, Undo2 } from 'lucide-react'
+import { CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2, ClipboardList, Undo2, FileText } from 'lucide-react'
 import { submissionsAPI } from '../../services/api.js'
 import ReturnReasonButton from '../../components/common/ReturnReasonButton.jsx'
+import FacultyLoadingSheet from '../../components/common/FacultyLoadingSheet.jsx'
 
 const REVERTIBLE_STATUSES = new Set(['pending_chief_cpd', 'pending_qa', 'pending_vpaa', 'pending_admin', 'validated'])
 
@@ -27,14 +28,6 @@ const STATUS_STYLE = {
   returned:          'bg-red-100 text-red-700 border border-red-200',
   validated:         'bg-blue-100 text-blue-800 border border-blue-200',
   scheduled:         'bg-purple-100 text-purple-800 border border-purple-200',
-}
-
-const YEAR_LABEL = { 1: '1st Year', 2: '2nd Year', 3: '3rd Year', 4: '4th Year' }
-const YEAR_COLORS = {
-  1: 'bg-blue-50 border-blue-200 text-blue-800',
-  2: 'bg-green-50 border-green-200 text-green-800',
-  3: 'bg-amber-50 border-amber-200 text-amber-800',
-  4: 'bg-purple-50 border-purple-200 text-purple-800',
 }
 
 export default function DeanReview() {
@@ -176,24 +169,21 @@ export default function DeanReview() {
 }
 
 function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpand, onAction, onRevert }) {
-  const [search, setSearch] = useState('')
-  const [yearFilter, setYearFilter] = useState('all')
-
-  const filteredEntries = useMemo(() => {
-    if (!entries || entries.type !== 'faculty_load') return null
-    const q = search.trim().toLowerCase()
-    return entries.entries.filter(e => {
-      if (yearFilter !== 'all' && String(e.year_level || '') !== yearFilter) return false
-      if (q) {
-        const hay = `${e.instructor_name || ''} ${e.course_code || ''} ${e.descriptive_title || ''} ${e.program_yr_sec || ''}`.toLowerCase()
-        if (!hay.includes(q)) return false
-      }
-      return true
-    })
-  }, [entries, search, yearFilter])
+  const [showSheet, setShowSheet] = useState(false)
 
   return (
     <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+      {showSheet && entries?.type === 'faculty_load' && (
+        <FacultyLoadingSheet
+          entries={entries.entries}
+          adminLoads={entries.adminLoads}
+          year={entries.academic_year}
+          semester={entries.semester}
+          collegeDept={entries.chair_dept || sub.chair_dept}
+          chairName={entries.chair_name || sub.chair_name}
+          onClose={() => setShowSheet(false)}
+        />
+      )}
       <div className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-gray-50 transition" onClick={onExpand}>
         <div>
           <p className="font-semibold text-gray-800">{sub.chair_dept || 'Unknown Dept'} — {sub.chair_name}</p>
@@ -219,76 +209,13 @@ function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpa
             <p className="text-sm text-gray-400 py-4">No entries found for this submission.</p>
           ) : entries.type === 'faculty_load' ? (
             <div className="mt-4 mb-5">
-              <p className="text-xs text-blue-700 font-semibold mb-2 flex items-center gap-1">
-                Faculty Loading Sheet — AY {entries.academic_year}, {['','1st','2nd','Summer'][entries.semester]} Semester
-              </p>
               {entries.entries.length === 0 ? (
                 <p className="text-sm text-gray-400">No entries found.</p>
               ) : (
-                <>
-                  <div className="flex flex-wrap items-center gap-2 mb-3">
-                    <div className="relative flex-1 min-w-[200px]">
-                      <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                      <input
-                        value={search}
-                        onChange={e => setSearch(e.target.value)}
-                        placeholder="Search course, title, section, or instructor…"
-                        className="w-full border-2 border-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:border-blue-400"
-                      />
-                    </div>
-                    <select value={yearFilter} onChange={e => setYearFilter(e.target.value)}
-                      className="border-2 border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-blue-400">
-                      <option value="all">All Years</option>
-                      {Object.entries(YEAR_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                    </select>
-                    <span className="text-xs text-gray-400 whitespace-nowrap">
-                      {filteredEntries.length} of {entries.entries.length}
-                    </span>
-                  </div>
-
-                  {filteredEntries.length === 0 ? (
-                    <p className="text-sm text-gray-400 py-4 text-center">No entries match this filter.</p>
-                  ) : (
-                    <div className="overflow-x-auto rounded-xl border border-gray-100">
-                      <table className="w-full text-xs">
-                        <thead className="bg-gray-50 text-gray-500 uppercase">
-                          <tr>
-                            <th className="px-3 py-2 text-left">Instructor</th>
-                            <th className="px-3 py-2 text-left">Course No.</th>
-                            <th className="px-3 py-2 text-left">Descriptive Title</th>
-                            <th className="px-3 py-2 text-left">Section</th>
-                            <th className="px-3 py-2 text-left">Year</th>
-                            <th className="px-3 py-2 text-center">Units</th>
-                            <th className="px-3 py-2 text-center">Lec</th>
-                            <th className="px-3 py-2 text-center">Lab</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {filteredEntries.map((e, i) => (
-                            <tr key={i} className="hover:bg-gray-50">
-                              <td className="px-3 py-2 font-medium text-gray-700">{e.instructor_name || '— Unassigned —'}</td>
-                              <td className="px-3 py-2 font-mono text-green-800 font-semibold">{e.course_code}</td>
-                              <td className="px-3 py-2 text-gray-600">{e.descriptive_title}</td>
-                              <td className="px-3 py-2 text-gray-500">{e.program_yr_sec || '—'}</td>
-                              <td className="px-3 py-2">
-                                {e.year_level ? (
-                                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${YEAR_COLORS[e.year_level]}`}>
-                                    {YEAR_LABEL[e.year_level]}
-                                  </span>
-                                ) : (
-                                  <span className="text-gray-300 italic">—</span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2 text-center text-gray-600">{e.units}</td>
-                              <td className="px-3 py-2 text-center text-gray-500">{e.lec_hours}</td>
-                              <td className="px-3 py-2 text-center text-gray-500">{e.lab_hours}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </>
+                <button onClick={() => setShowSheet(true)}
+                  className="flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition">
+                  <FileText className="w-4 h-4" /> View Faculty Loading Sheet ({entries.entries.length} entries)
+                </button>
               )}
             </div>
           ) : (

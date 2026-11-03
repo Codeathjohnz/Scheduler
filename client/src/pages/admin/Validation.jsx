@@ -4,10 +4,11 @@ import PageHeader from '../../components/ui/PageHeader.jsx'
 import toast from 'react-hot-toast'
 import {
   ShieldCheck, Cpu, ChevronDown, ChevronUp,
-  Loader2, ClipboardList, XCircle, CheckCircle2, Trash2, RotateCcw
+  Loader2, ClipboardList, XCircle, CheckCircle2, Trash2, RotateCcw, FileText
 } from 'lucide-react'
 import { submissionsAPI } from '../../services/api.js'
 import ReturnReasonButton from '../../components/common/ReturnReasonButton.jsx'
+import FacultyLoadingSheet from '../../components/common/FacultyLoadingSheet.jsx'
 
 const STATUS_LABEL = {
   pending_admin: 'Pending Validation',
@@ -247,8 +248,20 @@ export default function AdminValidation() {
 }
 
 function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpand, onAction, onDelete }) {
+  const [showSheet, setShowSheet] = useState(false)
   return (
     <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+      {showSheet && entries?.type === 'faculty_load' && (
+        <FacultyLoadingSheet
+          entries={entries.entries}
+          adminLoads={entries.adminLoads}
+          year={entries.academic_year}
+          semester={entries.semester}
+          collegeDept={entries.chair_dept || sub.chair_dept}
+          chairName={entries.chair_name || sub.chair_name}
+          onClose={() => setShowSheet(false)}
+        />
+      )}
       <div
         className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-gray-50 transition"
         onClick={onExpand}
@@ -292,40 +305,13 @@ function SubmissionCard({ sub, expanded, entries, loadingEntries, acting, onExpa
             <p className="text-sm text-gray-400 py-4">No entries found.</p>
           ) : entries.type === 'faculty_load' ? (
             <div className="mt-4 mb-5">
-              <p className="text-xs text-blue-700 font-semibold mb-2">
-                Faculty Loading Sheet — AY {entries.academic_year}, {['','1st','2nd','Summer'][entries.semester]} Semester
-              </p>
               {entries.entries.length === 0 ? (
                 <p className="text-sm text-gray-400">No entries found.</p>
               ) : (
-                <div className="overflow-x-auto rounded-xl border border-gray-100">
-                  <table className="w-full text-xs">
-                    <thead className="bg-gray-50 text-gray-500 uppercase">
-                      <tr>
-                        <th className="px-3 py-2 text-left">Instructor</th>
-                        <th className="px-3 py-2 text-left">Course No.</th>
-                        <th className="px-3 py-2 text-left">Descriptive Title</th>
-                        <th className="px-3 py-2 text-left">Section</th>
-                        <th className="px-3 py-2 text-center">Units</th>
-                        <th className="px-3 py-2 text-center">Lec</th>
-                        <th className="px-3 py-2 text-center">Lab</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {entries.entries.map((e, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-3 py-2 font-medium text-gray-700">{e.instructor_name || '— Unassigned —'}</td>
-                          <td className="px-3 py-2 font-mono text-green-800 font-semibold">{e.course_code}</td>
-                          <td className="px-3 py-2 text-gray-600">{e.descriptive_title}</td>
-                          <td className="px-3 py-2 text-gray-500">{e.program_yr_sec || '—'}</td>
-                          <td className="px-3 py-2 text-center text-gray-600">{e.units}</td>
-                          <td className="px-3 py-2 text-center text-gray-500">{e.lec_hours}</td>
-                          <td className="px-3 py-2 text-center text-gray-500">{e.lab_hours}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <button onClick={() => setShowSheet(true)}
+                  className="flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition">
+                  <FileText className="w-4 h-4" /> View Faculty Loading Sheet ({entries.entries.length} entries)
+                </button>
               )}
             </div>
           ) : (
