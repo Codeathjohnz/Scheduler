@@ -97,21 +97,29 @@ export async function buildIflWorkbook({ instructor, semester, year, sessions, e
     put(ws, `${'JKLM'[i]}11`, h, { bold: true, center: true, border: true, fill: GREY, wrap: true })
   })
 
-  // Timetable body: a labelled half-hour row for every slot, sessions written into their first slot
-  const grid = {}   // "row|col" -> [text]
+  // Timetable body: a labelled half-hour row for every slot. A session's text
+  // is merged across every slot its actual duration covers (e.g. a 2-hour
+  // lecture spans 4 rows) instead of being written only into its first 30
+  // minutes and leaving the rest of its real duration blank.
+  const owner = {}     // "row|col" -> text, written only on the merge's anchor (top-left) cell
+  const spanned = new Set()   // "row|col" keys covered by a merge, so the default-border pass below skips writing a value there
   for (const s of sessions) {
     const col = DAY_COL[s.days]
     if (!col) continue
     const start = toMin(s.start_time), end = toMin(s.end_time)
     const first = Math.floor((start - GRID_START) / SLOT_MIN)
-    const last = Math.ceil((end - GRID_START) / SLOT_MIN)
-    if (first < 0 || first >= GRID_SLOTS) continue
+    const last = Math.min(Math.ceil((end - GRID_START) / SLOT_MIN), GRID_SLOTS)
+    if (first < 0 || first >= GRID_SLOTS || last <= first) continue
     const floor = ordinalFloor(s.floor_level)
     const room = s.room && s.room.trim() ? `${s.room.trim()}${floor ? ` (${floor})` : ''}` : 'ONLINE CLASS'
     const text = `${s.course_code} (${String(s.session_type).toUpperCase() === 'LAB' ? 'LAB' : 'LEC'}) - (${s.program_yr_sec || '—'}) ${room}`
-    const key = `${GRID_FIRST_ROW + first}|${col}`
-    ;(grid[key] ||= []).push(text)
-    for (let k = first + 1; k < Math.min(last, GRID_SLOTS); k++) grid[`${GRID_FIRST_ROW + k}|${col}`] ||= []
+    const startRow = GRID_FIRST_ROW + first
+    const endRow = GRID_FIRST_ROW + last - 1
+    const L = String.fromCharCode(64 + col)
+    if (endRow > startRow) ws.mergeCells(`${L}${startRow}:${L}${endRow}`)
+    const key = `${startRow}|${col}`
+    owner[key] = owner[key] ? `${owner[key]}\n${text}` : text
+    for (let r = startRow; r <= endRow; r++) spanned.add(`${r}|${col}`)
   }
   for (let i = 0; i < GRID_SLOTS; i++) {
     const row = GRID_FIRST_ROW + i
@@ -121,8 +129,14 @@ export async function buildIflWorkbook({ instructor, semester, year, sessions, e
     for (const d of DAYS) {
       const col = DAY_COL[d]
       const L = String.fromCharCode(64 + col)
-      const items = grid[`${row}|${col}`]
-      put(ws, `${L}${row}`, items && items.length ? items.join('\n') : null, { border: true, wrap: true, size: 8 })
+      const key = `${row}|${col}`
+      if (spanned.has(key) && !owner[key]) {
+        // A non-anchor cell of a merged block — ExcelJS forbids setting a
+        // value on it directly, but it still needs its own border drawn.
+        ws.getCell(`${L}${row}`).border = box
+        continue
+      }
+      put(ws, `${L}${row}`, owner[key] || null, { border: true, wrap: true, size: 8 })
     }
   }
 
