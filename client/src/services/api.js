@@ -115,12 +115,13 @@ export const geCoordinatorAPI = {
 }
 
 export const placeholdersAPI = {
-  fill:    (academic_year, semester) => api.post('/placeholders/fill', { academic_year, semester }),
-  list:    (year, sem)               => api.get(`/placeholders?year=${year}&semester=${sem}`),
-  replace: (id, data)                => api.post(`/placeholders/${id}/replace`, data),
-  changes: ()                        => api.get('/placeholders/changes'),
-  respond: (changeId, action)        => api.patch(`/placeholders/changes/${changeId}/respond`, { action }),
-  release: (entry_ids, reason)       => api.patch('/placeholders/release', { entry_ids, reason }),
+  fill:      (academic_year, semester) => api.post('/placeholders/fill', { academic_year, semester }),
+  list:      (year, sem)               => api.get(`/placeholders?year=${year}&semester=${sem}`),
+  replace:   (id, data)                => api.post(`/placeholders/${id}/replace`, data),
+  changes:   ()                        => api.get('/placeholders/changes'),
+  respond:   (changeId, action)        => api.patch(`/placeholders/changes/${changeId}/respond`, { action }),
+  release:   (entry_ids, reason)       => api.patch('/placeholders/release', { entry_ids, reason }),
+  myPending: ()                        => api.get('/placeholders/my-pending'),
 }
 
 export const notificationsAPI = {

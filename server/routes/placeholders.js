@@ -382,6 +382,39 @@ router.post('/:id/replace', authenticate, authorize('chair'), async (req, res) =
   }
 })
 
+// ── GET /api/placeholders/my-pending — the signed-in instructor's own pending
+// placeholder-swap confirmations. Same data the dashboard notification
+// offers, surfaced here too so it's reachable from Confirm My Load and not
+// lost if the notification is missed or scrolled past.
+router.get('/my-pending', authenticate, authorize('instructor', 'chair', 'dean'), async (req, res) => {
+  try {
+    const [changes] = await pool.query(
+      `SELECT lc.*, c.name AS chair_name, c.department AS chair_dept, ph.name AS placeholder_name
+       FROM load_changes lc
+       JOIN users c ON c.id = lc.chair_id
+       JOIN users ph ON ph.id = lc.placeholder_id
+       WHERE lc.instructor_id = ? AND lc.status = 'pending'
+       ORDER BY lc.created_at DESC`,
+      [req.user.id]
+    )
+    if (!changes.length) return res.json([])
+    const allIds = [...new Set(changes.flatMap(c => JSON.parse(c.entry_ids)))]
+    const [entryRows] = await pool.query(
+      `SELECT id, course_code, descriptive_title, program_yr_sec, units, lec_hours, lab_hours
+       FROM faculty_load_entries WHERE id IN (?)`, [allIds]
+    )
+    const byId = new Map(entryRows.map(e => [e.id, e]))
+    const out = changes.map(c => ({
+      change_id: c.id, chair_name: c.chair_name, chair_dept: c.chair_dept, placeholder_name: c.placeholder_name,
+      academic_year: c.academic_year, semester: c.semester, created_at: c.created_at,
+      entries: JSON.parse(c.entry_ids).map(id => byId.get(id)).filter(Boolean),
+    }))
+    res.json(out)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
 // ── GET /api/placeholders/changes — the assignment log ─────────────────────────
 router.get('/changes', authenticate, authorize('chair', 'dean', 'admin'), async (req, res) => {
   try {

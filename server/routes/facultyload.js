@@ -838,7 +838,13 @@ router.get('/my-load.xlsx', authenticate, authorize('instructor', 'chair', 'dean
       JOIN faculty_load_entries fle ON fle.id = gs.faculty_entry_id
       LEFT JOIN rooms r ON r.id = gs.room_id
       WHERE fle.assigned_instructor_id = ? AND gs.academic_year = ? AND gs.semester = ?
-        AND gs.is_published = 1`,
+        AND gs.is_published = 1
+        AND NOT EXISTS (
+          SELECT 1 FROM load_changes lc
+          WHERE lc.instructor_id = fle.assigned_instructor_id
+            AND lc.status = 'pending'
+            AND FIND_IN_SET(fle.id, REPLACE(REPLACE(lc.entry_ids, '[', ''), ']', ''))
+        )`,
       [req.user.id, year, semester])
     const [adminLoads] = await pool.query(`
       SELECT load_type, description, units, hours FROM faculty_admin_loads

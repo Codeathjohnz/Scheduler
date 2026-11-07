@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '../../components/ui/PageHeader.jsx'
 import toast from 'react-hot-toast'
-import { CheckCircle2, ChevronDown, ChevronUp, Loader2, ClipboardList, Clock } from 'lucide-react'
-import { submissionsAPI } from '../../services/api.js'
+import { CheckCircle2, ChevronDown, ChevronUp, Loader2, ClipboardList, Clock, X, ArrowLeftRight } from 'lucide-react'
+import { submissionsAPI, placeholdersAPI } from '../../services/api.js'
 
 const SEM_LABEL = { 1: '1st', 2: '2nd', 3: 'Summer' }
 
@@ -14,6 +14,15 @@ export default function InstructorConfirmLoad() {
   const [loadingEntries, setLoadingEntries] = useState(null)
   const [confirming, setConfirming] = useState(null)
 
+  // A placeholder being swapped out for this person doesn't go through the
+  // original term submission's confirmation (that already finished, often
+  // long before the swap happens) — it's a separate, later confirmation
+  // (load_changes) that otherwise only ever showed up as a dashboard
+  // notification. Surfaced here too so it's never only-in-a-notification.
+  const [swaps, setSwaps]         = useState([])
+  const [loadingSwaps, setLoadingSwaps] = useState(true)
+  const [respondingId, setRespondingId] = useState(null)
+
   const fetchConfirmations = () => {
     setLoading(true)
     submissionsAPI.getMyConfirmations()
@@ -22,7 +31,28 @@ export default function InstructorConfirmLoad() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { fetchConfirmations() }, [])
+  const fetchSwaps = () => {
+    setLoadingSwaps(true)
+    placeholdersAPI.myPending()
+      .then(r => setSwaps(r.data))
+      .catch(() => {})
+      .finally(() => setLoadingSwaps(false))
+  }
+
+  useEffect(() => { fetchConfirmations(); fetchSwaps() }, [])
+
+  const handleSwapRespond = async (changeId, action) => {
+    setRespondingId(changeId)
+    try {
+      const r = await placeholdersAPI.respond(changeId, action)
+      toast.success(r.data.message)
+      fetchSwaps()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Something went wrong.')
+    } finally {
+      setRespondingId(null)
+    }
+  }
 
   const handleExpand = async (submissionId) => {
     if (expanded === submissionId) { setExpanded(null); return }
@@ -62,11 +92,11 @@ export default function InstructorConfirmLoad() {
         subtitle="Review and confirm the courses your Program Chair has assigned to you before it moves on to the Dean."
       />
 
-      {loading ? (
+      {loading || loadingSwaps ? (
         <div className="flex items-center justify-center py-20 text-gray-400">
           <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...
         </div>
-      ) : confirmations.length === 0 ? (
+      ) : confirmations.length === 0 && swaps.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center py-20 text-gray-400">
           <ClipboardList className="w-12 h-12 mb-3 opacity-30" />
           <p className="font-semibold text-gray-500">No faculty load to confirm yet.</p>
@@ -74,6 +104,21 @@ export default function InstructorConfirmLoad() {
         </div>
       ) : (
         <div className="space-y-6">
+          {swaps.length > 0 && (
+            <div>
+              <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-3">Instructor Reassignments Awaiting Your Confirmation ({swaps.length})</h2>
+              <div className="space-y-3">
+                {swaps.map(s => (
+                  <SwapCard key={s.change_id} s={s}
+                    responding={respondingId === s.change_id}
+                    onConfirm={() => handleSwapRespond(s.change_id, 'confirm')}
+                    onDecline={() => handleSwapRespond(s.change_id, 'decline')}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           {pending.length > 0 && (
             <div>
               <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-3">Awaiting Your Confirmation ({pending.length})</h2>
@@ -191,6 +236,79 @@ function ConfirmCard({ c, expanded, entries, loadingEntries, confirming, onExpan
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function SwapCard({ s, responding, onConfirm, onDecline }) {
+  const totalUnits = s.entries.reduce((a, e) => a + Number(e.units), 0)
+  return (
+    <div className="bg-white border-2 border-amber-200 rounded-2xl overflow-hidden shadow-sm">
+      <div className="flex items-center gap-3 px-5 py-4 bg-amber-50/60">
+        <ArrowLeftRight className="w-5 h-5 text-amber-700 shrink-0" />
+        <div className="min-w-0">
+          <p className="font-semibold text-gray-800">
+            {s.chair_dept} — {s.chair_name} assigned you {s.placeholder_name}'s load
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            AY {s.academic_year}, {SEM_LABEL[s.semester]} Semester · {new Date(s.created_at).toLocaleDateString()}
+          </p>
+        </div>
+      </div>
+
+      <div className="px-5 pb-5">
+        {s.entries.length > 0 && (
+          <div className="overflow-x-auto rounded-xl border border-gray-100 mt-4 mb-4">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 text-gray-500 uppercase">
+                <tr>
+                  <th className="px-3 py-2 text-left">Course No.</th>
+                  <th className="px-3 py-2 text-left">Descriptive Title</th>
+                  <th className="px-3 py-2 text-left">Section</th>
+                  <th className="px-3 py-2 text-center">Units</th>
+                  <th className="px-3 py-2 text-center">Lec</th>
+                  <th className="px-3 py-2 text-center">Lab</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {s.entries.map(e => (
+                  <tr key={e.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 font-mono text-green-800 font-semibold">{e.course_code}</td>
+                    <td className="px-3 py-2 text-gray-600">{e.descriptive_title}</td>
+                    <td className="px-3 py-2 text-gray-500">{e.program_yr_sec || '—'}</td>
+                    <td className="px-3 py-2 text-center text-gray-600">{e.units}</td>
+                    <td className="px-3 py-2 text-center text-gray-500">{e.lec_hours}</td>
+                    <td className="px-3 py-2 text-center text-gray-500">{e.lab_hours}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-green-50 font-bold">
+                  <td className="px-3 py-2" colSpan={3}>Total</td>
+                  <td className="px-3 py-2 text-center">{totalUnits}</td>
+                  <td colSpan={2}></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+
+        <p className="text-xs text-gray-500 mb-3">
+          Your schedule for these courses won't appear on My Schedule until you confirm.
+        </p>
+
+        <div className="flex gap-3">
+          <button onClick={onConfirm} disabled={responding}
+            className="flex items-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition">
+            {responding ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+            Confirm
+          </button>
+          <button onClick={onDecline} disabled={responding}
+            className="flex items-center gap-2 bg-white hover:bg-red-50 border border-red-200 disabled:opacity-60 text-red-700 text-sm font-semibold px-5 py-2.5 rounded-xl transition">
+            <X className="w-4 h-4" /> Decline
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

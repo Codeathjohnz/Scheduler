@@ -467,6 +467,11 @@ router.get('/dept', authenticate, authorize('chair'), async (req, res) => {
 })
 
 // ── GET /api/scheduling/my — instructor's own published schedule ─────────────
+// A subject whose instructor came from a placeholder swap that's still
+// PENDING this person's own confirm/decline (see PATCH
+// /api/placeholders/changes/:id/respond) is withheld here — confirming
+// comes first, so nobody ends up teaching a class they never agreed to just
+// because the chair swapped them in after the term was already published.
 router.get('/my', authenticate, async (req, res) => {
   const { year = '2026-2027', semester = 1 } = req.query
   try {
@@ -482,6 +487,12 @@ router.get('/my', authenticate, async (req, res) => {
       WHERE fle.assigned_instructor_id = ?
         AND gs.academic_year = ? AND gs.semester = ?
         AND gs.is_published = 1
+        AND NOT EXISTS (
+          SELECT 1 FROM load_changes lc
+          WHERE lc.instructor_id = fle.assigned_instructor_id
+            AND lc.status = 'pending'
+            AND FIND_IN_SET(fle.id, REPLACE(REPLACE(lc.entry_ids, '[', ''), ']', ''))
+        )
       ORDER BY gs.days, gs.start_time
     `, [req.user.id, year, semester])
     res.json(rows)
