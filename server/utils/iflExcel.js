@@ -121,11 +121,35 @@ export async function buildIflWorkbook({ instructor, semester, year, sessions, e
     owner[key] = owner[key] ? `${owner[key]}\n${text}` : text
     for (let r = startRow; r <= endRow; r++) spanned.add(`${r}|${col}`)
   }
+  const hh = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+  const gridEnd = GRID_START + GRID_SLOTS * SLOT_MIN
+
+  // TIME column: merged across every half-hour row EXCEPT where some
+  // session (on any day) actually starts or ends inside that stretch — so
+  // e.g. an uninterrupted 08:00-10:00 class gets one "08:00-10:00" label
+  // instead of four redundant "...-08:30", "08:30-09:00"... rows next to
+  // it, while a day that genuinely has a class starting at 08:30 still
+  // keeps that boundary visible. Classes can start on the half-hour, so
+  // this can't just switch to an hourly grid outright.
+  const breakpoints = new Set([GRID_START, gridEnd])
+  for (const s of sessions) {
+    if (!DAY_COL[s.days]) continue
+    const start = toMin(s.start_time), end = toMin(s.end_time)
+    if (start >= GRID_START && start <= gridEnd) breakpoints.add(start)
+    if (end >= GRID_START && end <= gridEnd) breakpoints.add(end)
+  }
+  const sortedBreaks = [...breakpoints].sort((a, b) => a - b)
+  for (let i = 0; i < sortedBreaks.length - 1; i++) {
+    const b1 = sortedBreaks[i], b2 = sortedBreaks[i + 1]
+    const rowStart = GRID_FIRST_ROW + (b1 - GRID_START) / SLOT_MIN
+    const rowEnd = GRID_FIRST_ROW + (b2 - GRID_START) / SLOT_MIN - 1
+    if (rowEnd > rowStart) ws.mergeCells(`A${rowStart}:A${rowEnd}`)
+    put(ws, `A${rowStart}`, `${hh(b1)}-${hh(b2)}`, { bold: true, center: true, border: true, size: 9 })
+    for (let r = rowStart + 1; r <= rowEnd; r++) ws.getCell(`A${r}`).border = box
+  }
+
   for (let i = 0; i < GRID_SLOTS; i++) {
     const row = GRID_FIRST_ROW + i
-    const t = GRID_START + i * SLOT_MIN
-    const hh = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
-    put(ws, `A${row}`, `${hh(t)}-${hh(t + SLOT_MIN)}`, { bold: true, border: true, size: 9 })
     for (const d of DAYS) {
       const col = DAY_COL[d]
       const L = String.fromCharCode(64 + col)
