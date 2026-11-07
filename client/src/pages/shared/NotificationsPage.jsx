@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import PageHeader from '../../components/ui/PageHeader.jsx'
-import { notificationsAPI, placeholdersAPI } from '../../services/api.js'
+import { notificationsAPI, placeholdersAPI, submissionsAPI } from '../../services/api.js'
 import { Bell, Check, X, ArrowUpRight, Loader2, CheckCheck } from 'lucide-react'
 
 // How long ago, in plain words.
@@ -56,10 +56,16 @@ export default function NotificationsPage() {
     setUnread(0)
   }
 
+  // "load_assigned" (a placeholder swap) answers confirm/decline through
+  // Placeholders; "load_confirm_needed" (a chair's faculty load submission
+  // awaiting this instructor's confirmation) is confirm-only, same as the
+  // Confirm My Load page — there's no "decline a whole term's load" action.
   const respond = async (n, action) => {
     setBusy(n.id)
     try {
-      const r = await placeholdersAPI.respond(n.ref_id, action)
+      const r = n.type === 'load_confirm_needed'
+        ? await submissionsAPI.confirm(n.ref_id)
+        : await placeholdersAPI.respond(n.ref_id, action)
       toast.success(r.data.message)
       await open(n)
       await load()
@@ -105,7 +111,7 @@ export default function NotificationsPage() {
           <ul className="divide-y divide-gray-100">
             {shown.map(n => {
               const flag = FLAG[n.flag]
-              const needsAnswer = n.type === 'load_assigned' && n.action_status === 'pending'
+              const needsAnswer = (n.type === 'load_assigned' || n.type === 'load_confirm_needed') && n.action_status === 'pending'
               return (
                 <li key={n.id} onClick={() => open(n)}
                   className={`px-6 py-4 border-l-4 cursor-pointer transition ${flag ? flag.bar : n.read_at ? 'border-transparent' : 'border-green-500'} ${n.read_at ? 'bg-white' : 'bg-green-50/50 hover:bg-green-50'}`}>
@@ -126,13 +132,15 @@ export default function NotificationsPage() {
                         className="flex items-center gap-1 px-3 py-1.5 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white text-xs font-semibold rounded-lg">
                         {busy === n.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Confirm my load
                       </button>
-                      <button disabled={busy === n.id} onClick={() => respond(n, 'decline')}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-white hover:bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg">
-                        <X className="w-3.5 h-3.5" /> Decline
-                      </button>
+                      {n.type === 'load_assigned' && (
+                        <button disabled={busy === n.id} onClick={() => respond(n, 'decline')}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-white hover:bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg">
+                          <X className="w-3.5 h-3.5" /> Decline
+                        </button>
+                      )}
                     </div>
                   )}
-                  {n.type === 'load_assigned' && n.action_status && n.action_status !== 'pending' && (
+                  {(n.type === 'load_assigned' || n.type === 'load_confirm_needed') && n.action_status && n.action_status !== 'pending' && (
                     <p className="text-[11px] mt-1 font-semibold text-gray-500">{n.action_status === 'confirmed' ? '✓ You confirmed this' : 'You declined this'}</p>
                   )}
                   {n.link && !needsAnswer && (

@@ -6,13 +6,21 @@ import { authenticate } from '../middleware/auth.js'
 const router = Router()
 
 // GET /api/notifications — latest 40 + how many are unread. For "load_assigned"
-// items the linked swap's status is included so the box can show Confirm/Decline
+// (a placeholder swap) and "load_confirm_needed" (a chair's faculty load
+// submission awaiting this instructor's confirmation) items, the linked
+// action's current status is included so the box can show Confirm/Decline
 // only while it's still waiting on the instructor.
 router.get('/', authenticate, async (req, res) => {
   try {
     const [items] = await pool.query(
       `SELECT n.id, n.type, n.title, n.body, n.link, n.ref_id, n.flag, n.created_at, n.read_at,
-              CASE WHEN n.type = 'load_assigned' THEN (SELECT lc.status FROM load_changes lc WHERE lc.id = n.ref_id) END AS action_status
+              CASE
+                WHEN n.type = 'load_assigned' THEN (SELECT lc.status FROM load_changes lc WHERE lc.id = n.ref_id)
+                WHEN n.type = 'load_confirm_needed' THEN (
+                  SELECT CASE WHEN sc.confirmed_at IS NOT NULL THEN 'confirmed' ELSE 'pending' END
+                  FROM submission_confirmations sc WHERE sc.submission_id = n.ref_id AND sc.instructor_id = n.user_id
+                )
+              END AS action_status
        FROM notifications n WHERE n.user_id = ? ORDER BY n.id DESC LIMIT 40`, [req.user.id]
     )
     const [[{ unread }]] = await pool.query('SELECT COUNT(*) AS unread FROM notifications WHERE user_id = ? AND read_at IS NULL', [req.user.id])

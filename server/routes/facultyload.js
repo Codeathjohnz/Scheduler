@@ -6,6 +6,7 @@ import { generateFacultyLoadingDocx } from '../utils/facultyLoadingDocx.js'
 import { programKey } from '../utils/detectProgram.js'
 import { buildIflWorkbook } from '../utils/iflExcel.js'
 import { rescheduleConflicts } from '../utils/rescheduleEntries.js'
+import { notify } from '../utils/notify.js'
 
 const router = Router()
 
@@ -37,10 +38,20 @@ export async function syncConfirmation(chairId, academicYear, semester, instruct
     [chairId, academicYear, semester]
   )
   if (!sub) return
-  await pool.query(
+  const [result] = await pool.query(
     'INSERT IGNORE INTO submission_confirmations (submission_id, instructor_id) VALUES (?, ?)',
     [sub.id, instructorId]
   )
+  // Only notify on a genuinely new confirmation row — re-syncing someone
+  // already on the list (e.g. re-running Auto-Generate) must not re-notify.
+  if (result.affectedRows !== 1) return
+  const [[inst]] = await pool.query('SELECT role FROM users WHERE id = ?', [instructorId])
+  const [[chair]] = await pool.query('SELECT name, department FROM users WHERE id = ?', [chairId])
+  await notify([instructorId], {
+    type: 'load_confirm_needed', refId: sub.id, link: `/${inst?.role || 'instructor'}/confirm-load`,
+    title: `Confirm your faculty load — AY ${academicYear}, Semester ${semester}`,
+    body: `${chair?.name || 'Your Program Chair'}${chair?.department ? ` (${chair.department})` : ''} assigned you a course for this term. Review and confirm before it moves on to the Dean.`,
+  })
 }
 
 // Auto-generate load-balancing policy: fill everyone up to the standard 21

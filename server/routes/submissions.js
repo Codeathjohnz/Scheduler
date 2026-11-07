@@ -155,7 +155,7 @@ router.post('/from-faculty-load', authenticate, authorize('chair'), async (req, 
     // get a confirmation row. If EVERY assigned instructor is a placeholder
     // there's nobody to wait on, so it goes straight to the Dean.
     const [realRows] = await conn.query(
-      `SELECT id FROM users WHERE id IN (${instructorIds.map(() => '?').join(',')}) AND is_placeholder = 0`,
+      `SELECT id, role FROM users WHERE id IN (${instructorIds.map(() => '?').join(',')}) AND is_placeholder = 0`,
       instructorIds
     )
     const realIds = realRows.map(r => r.id)
@@ -169,6 +169,25 @@ router.post('/from-faculty-load', authenticate, authorize('chair'), async (req, 
     }
 
     await conn.commit()
+
+    // Each recipient's own role picks the right "Confirm My Load" path —
+    // a chair or dean can be assigned as a teaching instructor too, and
+    // their confirm page lives under their own dashboard, not /instructor.
+    if (realRows.length) {
+      const byRole = new Map()
+      for (const r of realRows) {
+        if (!byRole.has(r.role)) byRole.set(r.role, [])
+        byRole.get(r.role).push(r.id)
+      }
+      for (const [role, ids] of byRole) {
+        await notify(ids, {
+          type: 'load_confirm_needed', refId: submissionId, link: `/${role}/confirm-load`,
+          title: `Confirm your faculty load — AY ${academic_year}, Semester ${semester}`,
+          body: `${req.user.name} (${req.user.department}) has assigned you courses for this term. Review and confirm before it moves on to the Dean.`,
+        })
+      }
+    }
+
     res.status(201).json({
       message: realIds.length
         ? `Faculty load submitted. Waiting on ${realIds.length} instructor${realIds.length > 1 ? 's' : ''} to confirm.`
