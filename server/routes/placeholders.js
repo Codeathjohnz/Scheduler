@@ -80,13 +80,9 @@ async function myPlaceholders(chairId) {
 }
 
 // ── POST /api/placeholders/fill ────────────────────────────────────────────────
-// Park every still-unassigned MAJOR subject on "Instructor A/B/C…" — all
-// sections of one subject always move together as a single unit (a whole
-// subject is one real instructor's one "preparation"), but a placeholder is
-// filled with SEVERAL different subjects, not just one, toward the 21-unit
-// target: a real instructor's load is normally spread across multiple preps,
-// not one subject repeated across every section. Reuses an existing
-// placeholder that still has room before creating a new one. GE/PATHFIT
+// Park every still-unassigned MAJOR subject on "Instructor A/B/C…" (21 units
+// each, all sections of a subject kept together), reusing existing
+// placeholders that still have room before creating a new one. GE/PATHFIT
 // subjects are left out on purpose — they stay unassigned so they show up in
 // the GE Coordinator's queue instead of disappearing onto a chair-owned
 // placeholder.
@@ -119,25 +115,15 @@ router.post('/fill', authenticate, authorize('chair'), async (req, res) => {
     const loadMap = await getCombinedLoadMap(academic_year, semester)
     const holders = (await myPlaceholders(req.user.id)).map(p => ({ ...p, load: loadMap[p.id] || 0 }))
     let created = 0
-
-    // Group into one block per subject — every section of it moves together,
-    // same as before — then bin-pack whole subjects across placeholders,
-    // largest first, so a placeholder picks up several different subjects on
-    // the way to the 21-unit target instead of stopping at just one.
-    const bySubject = new Map()
-    for (const e of entries) {
-      const key = e.subject_id ?? `course:${e.course_code}`
-      if (!bySubject.has(key)) bySubject.set(key, [])
-      bySubject.get(key).push(e)
-    }
-    const blocks = [...bySubject.values()]
-      .map(group => ({ entryIds: group.map(e => e.id), credit: group.reduce((a, e) => a + creditOf(e), 0) }))
-      .sort((a, b) => b.credit - a.credit)
-
+    const stickyBySubject = new Map()
     const assignedBy = new Map()   // placeholder id → entry ids
 
-    for (const block of blocks) {
-      let target = holders.find(h => h.load + block.credit <= TARGET_UNITS)
+    for (const e of entries) {
+      const credit = creditOf(e)
+      let target = null
+      const sticky = holders.find(h => h.id === stickyBySubject.get(e.subject_id))
+      if (sticky && sticky.load + credit <= TARGET_UNITS) target = sticky
+      if (!target) target = holders.find(h => h.load + credit <= TARGET_UNITS)
       if (!target) {
         const index = holders.length
         const username = `placeholder_${req.user.id}_${index + 1}_${Date.now().toString(36)}`
@@ -151,9 +137,10 @@ router.post('/fill', authenticate, authorize('chair'), async (req, res) => {
         holders.push(target)
         created++
       }
-      target.load += block.credit
+      target.load += credit
+      if (e.subject_id) stickyBySubject.set(e.subject_id, target.id)
       if (!assignedBy.has(target.id)) assignedBy.set(target.id, [])
-      assignedBy.get(target.id).push(...block.entryIds)
+      assignedBy.get(target.id).push(e.id)
     }
     for (const [id, entryIds] of assignedBy) {
       await pool.query('UPDATE faculty_load_entries SET assigned_instructor_id = ? WHERE id IN (?)', [id, entryIds])
