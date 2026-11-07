@@ -3,7 +3,7 @@ import pool from '../config/db.js'
 import { notify, adminIds } from '../utils/notify.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { generateSchedule, generateScheduleGA, generateScheduleORTools, generateScheduleHybridGAThenORTools, detectConflicts, minToTime, timeToMin } from '../utils/scheduler.js'
-import { suggestFixForConflict } from '../utils/rescheduleEntries.js'
+import { suggestFixForConflict, toPlacement } from '../utils/rescheduleEntries.js'
 
 const router = Router()
 
@@ -60,15 +60,17 @@ router.post('/suggest-fix', authenticate, authorize('admin'), async (req, res) =
 router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
   const { year = '2026-2027', semester = 1, clear_existing = true, engine = 'hybrid' } = req.body
   try {
-    // A published term is final: it's recorded in Transaction History, and
-    // generating again would replace it.
-    const [[done]] = await pool.query(
+    // A term can receive validated submissions from different chairs at
+    // different times — some may already be published (live, possibly
+    // relied on) before another chair's submission even gets validated.
+    // Once anything for this term is published, generation switches to
+    // INCREMENTAL mode below: only entries with no schedule yet are placed,
+    // around everything already published (treated as fixed, never moved).
+    const [[published]] = await pool.query(
       'SELECT COUNT(*) AS n FROM generated_schedules WHERE academic_year = ? AND semester = ? AND is_published = 1',
       [year, semester]
     )
-    if (done.n > 0) {
-      return res.status(400).json({ message: "This term is already published and recorded in Transaction History, so it can't be generated again." })
-    }
+    const alreadyPublished = published.n > 0
     // The 2nd semester (and any later one) runs only after the one before it
     // has been published. Each semester is scheduled against its own rooms
     // and times, so the earlier term's bookings don't block it.
@@ -109,6 +111,32 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
       return res.status(400).json({ message: 'Validated submissions have no faculty load entries.' })
     }
 
+    // Incremental mode: some of these validated entries may already have a
+    // published placement from an earlier generate+publish for this same
+    // term (a different chair's submission, validated and scheduled first).
+    // Only the rest get scheduled, around every already-published session —
+    // fixed, never moved.
+    let entriesToSchedule = entries
+    let fixed = []
+    if (alreadyPublished) {
+      const [existingRows] = await pool.query(
+        `SELECT gs.*, fle.program_yr_sec, fle.assigned_instructor_id AS instructor_id
+         FROM generated_schedules gs
+         JOIN faculty_load_entries fle ON fle.id = gs.faculty_entry_id
+         WHERE gs.academic_year = ? AND gs.semester = ?`,
+        [year, semester]
+      )
+      const alreadyScheduledIds = new Set(existingRows.map(r => r.faculty_entry_id))
+      entriesToSchedule = entries.filter(e => !alreadyScheduledIds.has(e.id))
+      if (!entriesToSchedule.length) {
+        return res.status(400).json({ message: "Every validated submission for this term already has a published schedule. There's nothing new to generate." })
+      }
+      fixed = existingRows.map(toPlacement).map(p => ({
+        entryId: p.entryId, instructorId: p.instructorId, programYrSec: p.programYrSec, roomId: p.roomId,
+        daysMask: p.daysMask, startMin: p.startMin, durationMin: p.durationMin, days: p.days, sessionType: p.sessionType,
+      }))
+    }
+
     const [rooms] = await pool.query('SELECT * FROM rooms ORDER BY room_type, floor_level, id')
     if (!rooms.length) {
       return res.status(400).json({ message: 'No rooms found. Add rooms in Manage Rooms first.' })
@@ -138,23 +166,34 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
     // no-double-booking guarantee regardless of what the GA found on its
     // own. 'genetic' and 'ortools' run either engine alone; 'greedy' is the
     // fast one-pass heuristic. The three single-engine options stay
-    // available as advanced alternatives.
+    // available as advanced alternatives. Incremental mode (above) always
+    // uses the plain greedy engine — it's the only one that can schedule
+    // AROUND a fixed, already-published set of sessions without moving them;
+    // GA/OR-Tools/Hybrid always plan from a clean slate.
     const engineStart = Date.now()
     let result
-    if (engine === 'genetic') {
-      result = generateScheduleGA(entries, rooms, mobilityMap, buildingPriorities)
+    if (alreadyPublished) {
+      result = generateSchedule(entriesToSchedule, rooms, mobilityMap, buildingPriorities, fixed)
+    } else if (engine === 'genetic') {
+      result = generateScheduleGA(entriesToSchedule, rooms, mobilityMap, buildingPriorities)
     } else if (engine === 'ortools') {
-      result = await generateScheduleORTools(entries, rooms, mobilityMap, buildingPriorities)
+      result = await generateScheduleORTools(entriesToSchedule, rooms, mobilityMap, buildingPriorities)
     } else if (engine === 'hybrid') {
-      result = await generateScheduleHybridGAThenORTools(entries, rooms, mobilityMap, buildingPriorities)
+      result = await generateScheduleHybridGAThenORTools(entriesToSchedule, rooms, mobilityMap, buildingPriorities)
     } else {
-      result = generateSchedule(entries, rooms, mobilityMap, buildingPriorities)
+      result = generateSchedule(entriesToSchedule, rooms, mobilityMap, buildingPriorities)
     }
+    // generateSchedule() uses `fixed` to avoid conflicting with already-
+    // published sessions, but never returns them in `scheduled` — only
+    // the newly placed ones come back, so nothing already in the database
+    // gets re-inserted.
     const { scheduled, unscheduled } = result
     const engineRuntimeMs = Date.now() - engineStart
 
-    // Persist results
-    if (clear_existing) {
+    // Persist results. Incremental mode never clears anything — the whole
+    // point is that already-published sessions for this term stay exactly
+    // where they are.
+    if (clear_existing && !alreadyPublished) {
       await pool.query('DELETE FROM generated_schedules WHERE academic_year=? AND semester=?', [year, semester])
     }
 
@@ -171,7 +210,9 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
       `, [rows])
     }
 
-    // Mark validated submissions as scheduled
+    // Mark validated submissions as scheduled — only touches submissions
+    // still at 'validated' (an already-scheduled chair's submission from an
+    // earlier run is already past this status, so it's untouched here).
     if (scheduled.length > 0) {
       await pool.query(
         `UPDATE submissions SET status = 'scheduled' WHERE academic_year = ? AND semester = ? AND status = 'validated'`,
@@ -179,23 +220,25 @@ router.post('/generate', authenticate, authorize('admin'), async (req, res) => {
       )
     }
 
+    const reportedEngine = alreadyPublished ? 'greedy' : engine
     res.json({
       scheduled: scheduled.length,
       unscheduled: unscheduled.length,
       unscheduledList: unscheduled.map(u => ({ course: u.courseCode, reason: u.reason, type: u.sessionType })),
-      engine,
+      engine: reportedEngine,
+      incremental: alreadyPublished,
       engineRuntimeMs,
-      ...(engine === 'genetic' ? {
+      ...(!alreadyPublished && engine === 'genetic' ? {
         generationsRun: result.generationsRun,
         finalFitness: result.finalFitness,
         hardConflicts: result.hardConflicts,
       } : {}),
-      ...(engine === 'ortools' ? {
+      ...(!alreadyPublished && engine === 'ortools' ? {
         solverStatus: result.solverStatus,
         objectiveValue: result.objectiveValue,
         solverWallTimeSeconds: result.solverWallTimeSeconds,
       } : {}),
-      ...(engine === 'hybrid' ? {
+      ...(!alreadyPublished && engine === 'hybrid' ? {
         solverStatus: result.solverStatus,
         objectiveValue: result.objectiveValue,
         solverWallTimeSeconds: result.solverWallTimeSeconds,

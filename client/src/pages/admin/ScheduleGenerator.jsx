@@ -356,13 +356,13 @@ export default function ScheduleGenerator() {
   useEffect(() => { fetchSchedules(); fetchRooms() }, [year, semester])
 
   const handleGenerate = async () => {
-    if (!confirm('This will replace all existing schedules for this term. Continue?')) return
+    if (!confirm("This generates schedules for every validated submission that doesn't have one yet for this term. Already-published schedules won't be touched. Continue?")) return
     setGenerating(true); setUnscheduled([]); setLastRun(null)
     try {
       const r = await api.post('/scheduling/generate', { year, semester, clear_existing: true, engine })
       setLastRun(r.data)
       const engineLabel = r.data.engine === 'genetic' ? 'Genetic Algorithm' : r.data.engine === 'ortools' ? 'Google OR-Tools' : r.data.engine === 'hybrid' ? 'Hybrid (GA + OR-Tools)' : 'Greedy'
-      toast.success(`${engineLabel} engine generated ${r.data.scheduled} sessions in ${r.data.engineRuntimeMs}ms.`)
+      toast.success(`${engineLabel} engine generated ${r.data.scheduled} sessions in ${r.data.engineRuntimeMs}ms.${r.data.incremental ? ' Already-published schedules for this term were left untouched.' : ''}`)
       if (r.data.unscheduled > 0) {
         toast(`${r.data.unscheduled} session(s) could not be scheduled — see warnings below.`, { icon: '⚠' })
         setUnscheduled(r.data.unscheduledList)

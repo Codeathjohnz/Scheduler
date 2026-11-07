@@ -21,7 +21,7 @@ const DAY_BITS = { Monday: 1, Tuesday: 2, Wednesday: 4, Thursday: 8, Friday: 16,
 const maskOf = (days) => days.reduce((acc, d) => acc | (DAY_BITS[d] || 0), 0)
 const overlap = (aStart, aDur, bStart, bDur) => aStart < bStart + bDur && aStart + aDur > bStart
 
-function toPlacement(row) {
+export function toPlacement(row) {
   const days = String(row.days).split(',').map(d => d.trim()).filter(Boolean)
   const startMin = timeToMin(String(row.start_time).slice(0, 5))
   const endMin = timeToMin(String(row.end_time).slice(0, 5))
