@@ -106,7 +106,7 @@ export default function AdminRooms() {
   // "Restrict To" is picked, not typed: colleges (departments) and the
   // programs inside them. Saved as the same comma-separated list as before.
   const [deptOptions, setDeptOptions]         = useState([])
-  const [progOptions, setProgOptions]         = useState([])
+  const [progsByDept, setProgsByDept]         = useState({})   // { [dept]: string[] } — which programs belong to which checked college
   const [restrictDepts, setRestrictDepts]     = useState([])
   const [restrictPrograms, setRestrictPrograms] = useState([])
   const [editingId, setEditingId] = useState(null)   // null = Add mode, else editing this room's id
@@ -126,10 +126,11 @@ export default function AdminRooms() {
 
   // Programs offered by the picked colleges, from their prospectuses and tags.
   useEffect(() => {
-    if (!restrictDepts.length) { setProgOptions([]); return }
-    Promise.all(restrictDepts.map(d => usersAPI.getProgramOptions(d).then(r => r.data).catch(() => [])))
-      .then(lists => setProgOptions([...new Set(lists.flat())].sort()))
+    if (!restrictDepts.length) { setProgsByDept({}); return }
+    Promise.all(restrictDepts.map(d => usersAPI.getProgramOptions(d).then(r => [d, r.data]).catch(() => [d, []])))
+      .then(pairs => setProgsByDept(Object.fromEntries(pairs)))
   }, [restrictDepts])
+  const progOptions = [...new Set(Object.values(progsByDept).flat())].sort()
   const [editingBuilding, setEditingBuilding] = useState(null)
   const [draftPrograms, setDraftPrograms]     = useState([])
   const [newProgram, setNewProgram]           = useState('')
@@ -212,10 +213,20 @@ export default function AdminRooms() {
     setShowModal(true)
   }
 
+  // Picking a program under a checked college means "only this program", not
+  // "this program in addition to everyone else in the college" — so a
+  // college keeps its own blanket (whole-college) tag only when NONE of its
+  // programs have been narrowed down; otherwise just the picked program(s)
+  // are stored, actually narrowing access the way the "pick to narrow
+  // further" label promises.
+  const effectiveRestriction = (depts, progs) => {
+    const keptDepts = depts.filter(d => !(progsByDept[d] || []).some(p => progs.includes(p)))
+    return [...keptDepts, ...progs]
+  }
   // Keeps the saved string and the picker in step.
   const setRestriction = (depts, progs) => {
     setRestrictDepts(depts); setRestrictPrograms(progs)
-    setForm(f => ({ ...f, program_restriction: [...depts, ...progs].join(',') }))
+    setForm(f => ({ ...f, program_restriction: effectiveRestriction(depts, progs).join(',') }))
   }
   const toggleIn = (list, value) => list.includes(value) ? list.filter(v => v !== value) : [...list, value]
   const openEdit = (room) => {
@@ -627,7 +638,7 @@ export default function AdminRooms() {
                 )}
                 <p className="text-xs text-gray-400">
                   {restrictDepts.length || restrictPrograms.length
-                    ? <>Only <strong className="text-gray-600">{[...restrictDepts, ...restrictPrograms].join(', ')}</strong> can use this room.</>
+                    ? <>Only <strong className="text-gray-600">{effectiveRestriction(restrictDepts, restrictPrograms).join(', ')}</strong> can use this room.</>
                     : 'Nothing picked — open to everyone.'}
                 </p>
               </div>

@@ -571,6 +571,65 @@ const steps = [
       return true
     },
   },
+  // Data fix, not schema: Manage Rooms used to save a room's "Restrict To"
+  // as the whole-college tag PLUS whichever specific programs were checked
+  // under it (e.g. "CTE,BTLED-HE,BTLED-AFA,BTLED-IA") — since the scheduler
+  // allows a room by EITHER a department match OR a program match, the
+  // leftover college-wide tag silently kept the room open to every program
+  // in that college (e.g. BEED), defeating the "pick to narrow further"
+  // programs entirely. The client no longer saves that redundant tag; this
+  // retroactively strips it from rooms saved before the fix. Naturally
+  // idempotent — finds nothing left to change once applied.
+  {
+    name: 'rooms.program_restriction: drop redundant college-wide tags once narrowed to specific programs',
+    async run(pool) {
+      const [rows] = await pool.query(
+        `SELECT id, program_restriction FROM rooms WHERE program_restriction IS NOT NULL AND program_restriction <> ''`
+      )
+      if (!rows.length) return false
+
+      const [deptRows] = await pool.query(
+        `SELECT DISTINCT department FROM users WHERE department IS NOT NULL AND department <> '' AND role <> 'student'`
+      )
+      const depts = deptRows.map(r => r.department.trim()).filter(Boolean)
+      if (!depts.length) return false
+      const deptKeys = new Set(depts.map(d => d.toUpperCase()))
+
+      // Same union prospectus.program + users.programs tags as GET /api/users/program-options.
+      const progsByDept = {}
+      for (const dept of depts) {
+        const [progRows] = await pool.query(
+          `SELECT DISTINCT p.program AS program FROM prospectus p
+           JOIN users u ON p.uploaded_by = u.id WHERE u.department = ?`,
+          [dept]
+        )
+        const [userRows] = await pool.query(
+          'SELECT programs FROM users WHERE department = ? AND programs IS NOT NULL', [dept]
+        )
+        const seen = new Set()
+        for (const r of progRows) if (r.program) for (const p of r.program.split(',')) if (p.trim()) seen.add(p.trim().toUpperCase())
+        for (const r of userRows) for (const p of r.programs.split(',')) if (p.trim()) seen.add(p.trim().toUpperCase())
+        progsByDept[dept.toUpperCase()] = seen
+      }
+
+      let changed = false
+      for (const room of rows) {
+        const tags = room.program_restriction.split(',').map(t => t.trim()).filter(Boolean)
+        const deptTags = tags.filter(t => deptKeys.has(t.toUpperCase()))
+        const progTags = tags.filter(t => !deptKeys.has(t.toUpperCase()))
+        if (!deptTags.length || !progTags.length) continue   // nothing to narrow
+        const keptDepts = deptTags.filter(d => {
+          const progs = progsByDept[d.toUpperCase()] || new Set()
+          return !progTags.some(p => progs.has(p.toUpperCase()))
+        })
+        if (keptDepts.length === deptTags.length) continue   // no overlap, nothing changes
+        const next = [...keptDepts, ...progTags].join(',')
+        await pool.query('UPDATE rooms SET program_restriction = ? WHERE id = ?', [next, room.id])
+        changed = true
+      }
+      return changed
+    },
+  },
 ]
 
 export async function runMigrations(pool) {
