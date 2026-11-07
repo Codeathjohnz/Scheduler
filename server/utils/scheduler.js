@@ -149,9 +149,14 @@ function buildingAccess(building, department, buildingPriorities, program = null
   if (!rules || Object.keys(rules).length === 0) {
     return { allowed: true, rank: null }
   }
-  if (program && Object.prototype.hasOwnProperty.call(rules, program)) {
-    return { allowed: true, rank: rules[program] }
+  // `program` can itself carry several comma-separated tags (a prospectus
+  // filed under more than one program) — take the best (lowest-numbered)
+  // rank among whichever of them has a rule for this building.
+  let best = null
+  for (const p of String(program || '').split(',').map(s => s.trim()).filter(Boolean)) {
+    if (Object.prototype.hasOwnProperty.call(rules, p) && (best === null || rules[p] < best)) best = rules[p]
   }
+  if (best !== null) return { allowed: true, rank: best }
   if (department && Object.prototype.hasOwnProperty.call(rules, department)) {
     return { allowed: true, rank: rules[department] }
   }
@@ -172,8 +177,9 @@ function roomAllowsProgram(room, department, program) {
   const allowed = raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
   if (!allowed.length) return true
   const dept = (department || '').trim().toUpperCase()
-  const prog = (program || '').trim().toUpperCase()
-  return (!!dept && allowed.includes(dept)) || (!!prog && allowed.includes(prog))
+  // `program` can itself carry several comma-separated tags — allowed if ANY of them matches.
+  const progs = String(program || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+  return (!!dept && allowed.includes(dept)) || progs.some(p => allowed.includes(p))
 }
 
 function filterRoomsByProgram(rooms, department, program, buildingPriorities) {

@@ -43,6 +43,15 @@ const creditOf = (e) => isNstp(e.course_code) ? 0 : subjectCredit(e)
 const norm = (s) => String(s || '').trim().toUpperCase()
 const SEM = { 1: '1st', 2: '2nd', 3: 'Summer' }
 
+// Both users.programs and prospectus.program can hold several comma-separated
+// tags (a chair holding more than one program) — true when either side names
+// at least one program the other also names.
+function programsOverlap(a, b) {
+  const as = String(a || '').split(',').map(norm).filter(Boolean)
+  const bs = String(b || '').split(',').map(norm).filter(Boolean)
+  return as.some(x => bs.includes(x))
+}
+
 // "MATH 101 (1A, 1B, 1C), MATH 102 (1A)" — sections grouped under their subject so
 // notifications stay readable when a placeholder held many.
 function summarize(entries) {
@@ -217,7 +226,7 @@ router.get('/', authenticate, authorize('chair'), async (req, res) => {
     // Honour "I only teach BSIS": an instructor tagged for other programs isn't offered a BSIT placeholder.
     const candidates = cands.filter(c => {
       const list = String(c.programs || '').split(',').map(norm).filter(Boolean)
-      return !list.length || !chair.program || list.includes(norm(chair.program))
+      return !list.length || !chair.program || programsOverlap(list.join(','), chair.program)
     })
 
     const out = []
@@ -284,7 +293,7 @@ router.post('/:id/replace', authenticate, authorize('chair'), async (req, res) =
       return res.status(400).json({ message: `${inst.name} can't take these directly — only ${chair.department} instructors can. Use a teaching request for other departments.` })
     }
     const progList = String(inst.programs || '').split(',').map(norm).filter(Boolean)
-    if (progList.length && chair.program && !progList.includes(norm(chair.program))) {
+    if (progList.length && chair.program && !programsOverlap(progList.join(','), chair.program)) {
       return res.status(400).json({ message: `${inst.name} teaches for ${inst.programs}, not ${chair.program}.` })
     }
 

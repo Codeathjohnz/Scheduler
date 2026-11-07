@@ -9,6 +9,19 @@ import { rescheduleConflicts } from '../utils/rescheduleEntries.js'
 
 const router = Router()
 
+// A prospectus's `program` column (and users.programs) can each hold several
+// comma-separated tags — true when either side names at least one program
+// the other also names (e.g. a prospectus tagged "BSIT,BSIS" matches an
+// instructor tagged just "BSIS").
+function programsOverlap(a, b) {
+  const as = String(a || '').split(',').map(programKey).filter(Boolean)
+  const bs = String(b || '').split(',').map(programKey).filter(Boolean)
+  return as.some(x => bs.includes(x))
+}
+function splitPrograms(str) {
+  return String(str || '').split(',').map(p => p.trim()).filter(Boolean)
+}
+
 // While a submission is still at the instructor-confirmation stage, an
 // instructor newly assigned (or reassigned) to a subject needs to be pulled
 // into that same confirmation set — otherwise their load would be silently
@@ -136,8 +149,7 @@ async function programMismatchProblem(instructorId, subjectId) {
     `SELECT p.program FROM prospectus_subjects ps LEFT JOIN prospectus p ON p.id = ps.prospectus_id WHERE ps.id = ?`, [subjectId]
   )
   if (!inst || !subj?.program || !inst.programs) return null
-  const allowed = inst.programs.split(',').map(programKey)
-  if (allowed.includes(programKey(subj.program))) return null
+  if (programsOverlap(inst.programs, subj.program)) return null
   return `${inst.name} teaches for ${inst.programs} — this subject belongs to the ${subj.program} prospectus. Pick an instructor tagged for ${subj.program}, or fix their programs under Manage Users if that's wrong.`
 }
 
@@ -192,9 +204,8 @@ router.get('/', authenticate, authorize('chair', 'admin'), async (req, res) => {
         u.is_placeholder AS instructor_is_placeholder,
         ps.prerequisite,
         p.program AS subject_program,
-        (fle.assigned_instructor_id IS NOT NULL AND u.department = c.department
-          AND u.programs IS NOT NULL AND u.programs <> ''
-          AND p.program IS NOT NULL AND NOT FIND_IN_SET(p.program, u.programs)) AS program_mismatch,
+        u.programs AS instructor_programs,
+        (fle.assigned_instructor_id IS NOT NULL AND u.department = c.department) AS same_dept,
         (SELECT c.stage FROM cross_dept_chain c WHERE c.entry_id = fle.id AND c.stage NOT IN ('finalized','cancelled') ORDER BY c.id DESC LIMIT 1) AS request_status,
         (SELECT COALESCE(ci.name, c.target_department) FROM cross_dept_chain c LEFT JOIN users ci ON ci.id = c.instructor_id WHERE c.entry_id = fle.id AND c.stage NOT IN ('finalized','cancelled') ORDER BY c.id DESC LIMIT 1) AS request_instructor,
         (SELECT c.decline_stage FROM cross_dept_chain c WHERE c.entry_id = fle.id AND c.stage = 'declined' ORDER BY c.id DESC LIMIT 1) AS request_declined_stage,
@@ -208,6 +219,13 @@ router.get('/', authenticate, authorize('chair', 'admin'), async (req, res) => {
         ${isChair ? 'AND fle.chair_id = ?' : ''}
       ORDER BY u.name, fle.sort_order, fle.id
     `, entriesParams)
+
+    for (const e of entries) {
+      e.program_mismatch = !!(e.same_dept && e.instructor_programs && e.subject_program
+        && !programsOverlap(e.instructor_programs, e.subject_program))
+      delete e.same_dept
+      delete e.instructor_programs
+    }
 
     const adminParams = isChair ? [year, semester, req.user.id] : [year, semester]
     const [adminLoads] = await pool.query(`
@@ -303,12 +321,20 @@ router.get('/instructors/:subjectId', authenticate, authorize('chair', 'admin'),
     // An untagged instructor (programs empty) is open to every program in the
     // department, as documented on the column.
     const [[me]] = await pool.query('SELECT department FROM users WHERE id = ?', [req.user.id])
+    // subject.program can itself carry several tags (a shared-curriculum
+    // prospectus filed under more than one program) — an instructor matches
+    // if their own tags overlap ANY of them.
+    const subjectProgramTags = requiredDept ? [] : splitPrograms(subject?.program)
     const deptCondition = requiredDept
       ? 'u.department = ?'
-      : `(u.department = ? AND (u.programs IS NULL OR u.programs = '' OR ? IS NULL OR FIND_IN_SET(?, u.programs)))`
+      : subjectProgramTags.length
+        ? `(u.department = ? AND (u.programs IS NULL OR u.programs = '' OR (${subjectProgramTags.map(() => 'FIND_IN_SET(?, u.programs)').join(' OR ')})))`
+        : 'u.department = ?'
     const deptParams = requiredDept
       ? [requiredDept]
-      : [me?.department, subject?.program || null, subject?.program || null]
+      : subjectProgramTags.length
+        ? [me?.department, ...subjectProgramTags]
+        : [me?.department]
 
     const [instructors] = await pool.query(`
       SELECT u.id, u.name, u.department, u.role,
@@ -609,7 +635,7 @@ router.delete('/admin-load/:id', authenticate, authorize('chair', 'admin'), asyn
 // overload the same shared-pool instructor, and a placeholder standing in for
 // "nobody yet" is a clearer state than a guessed specialist.
 router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (req, res) => {
-  const { academic_year, semester, prospectus_id, clear_existing } = req.body
+  const { academic_year, semester, prospectus_id, clear_existing, program: requestedProgram } = req.body
   try {
     // Get subjects to assign
     let subjects
@@ -646,13 +672,21 @@ router.post('/auto-generate', authenticate, authorize('chair', 'admin'), async (
       return res.status(400).json({ message: `No ${['','1st','2nd','Summer'][semester] || ''} Semester subjects found in the selected prospectus.` })
     }
 
-    // Program name (for auto-labeling sections, e.g. "BSIT")
+    // Program name (for auto-labeling sections, e.g. "BSIT"). A prospectus
+    // tagged with more than one program (a chair holding several majors) picks
+    // ONE to label THIS run's sections under — the `program` request param,
+    // when it names one of the prospectus's own tags; otherwise the first tag,
+    // same as before this could ever hold more than one.
     let program = 'BSIT'
     {
       const progId = prospectus_id || subjects[0]?.prospectus_id
       if (progId) {
         const [[p]] = await pool.query('SELECT program FROM prospectus WHERE id=?', [progId])
-        if (p?.program) program = p.program
+        if (p?.program) {
+          const tags = splitPrograms(p.program)
+          const matched = requestedProgram && tags.find(t => programKey(t) === programKey(requestedProgram))
+          program = matched || tags[0] || p.program
+        }
       }
     }
 

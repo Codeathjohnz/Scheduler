@@ -12,6 +12,14 @@ async function chairTags(userId) {
   return String(me?.programs || '').split(',').map(p => p.trim()).filter(Boolean)
 }
 
+// A prospectus's `program` column holds one or more program tags, comma-
+// separated the same way users.programs does — a chair who holds several
+// programs (e.g. a major spanning BSIT and BSIS) can tag a single uploaded
+// prospectus with all of them at once instead of uploading it once per program.
+function splitPrograms(str) {
+  return String(str || '').split(',').map(p => p.trim()).filter(Boolean)
+}
+
 const router = Router()
 
 // ── Word (.docx) prospectus parsing ───────────────────────────────────────────
@@ -241,7 +249,10 @@ async function departmentSubjects(department, semester, programs = []) {
   // than left for the instructor to (wrongly) pick as their specialty.
   const major = rows.filter(s => !isGeneralEd(s.course_code) && !isPathfit(s.course_code) && !isNstp(s.course_code))
   const scoped = programs.length
-    ? major.filter(s => !s.prospectus_program || programs.includes(programKey(s.prospectus_program)))
+    ? major.filter(s => {
+        const tags = splitPrograms(s.prospectus_program).map(programKey)
+        return !tags.length || tags.some(t => programs.includes(t))
+      })
     : major
   return scoped.map(({ prospectus_program, ...rest }) => ({ ...rest, program: prospectus_program || null }))
 }
@@ -327,21 +338,28 @@ router.post('/', authenticate, authorize('chair', 'admin'), async (req, res) => 
     return res.status(400).json({ message: 'No subjects provided.' })
   }
 
-  // The program a prospectus is filed under comes from the chair's own
-  // account tag (users.programs), never a default. If the file itself names
-  // a different program than the one this chair chairs, refuse — that's a
-  // wrong file or a wrong account tag, and an admin needs to look at it.
+  // The program(s) a prospectus is filed under come from the chair's own
+  // account tags (users.programs), never a default. A chair who holds more
+  // than one program can tag a single upload with several at once (e.g. a
+  // major spanning BSIT and BSIS, or a shared curriculum both programs
+  // follow). If the file itself names a program not among the ones picked,
+  // refuse — that's a wrong file or a wrong account tag, and an admin needs
+  // to look at it.
   const [[me]] = await pool.query('SELECT programs FROM users WHERE id = ?', [req.user.id])
   const tags = String(me?.programs || '').split(',').map(p => p.trim()).filter(Boolean)
-  let label = program ? String(program).trim() : ''
+  let picked = splitPrograms(program)
   if (tags.length) {
-    if (!label) label = tags[0]
-    if (!tags.some(t => sameProgram(t, label))) {
-      return res.status(400).json({ message: `Your account chairs ${tags.join(', ')}, but this prospectus is labeled ${label}. Pick ${tags.join(' or ')}, or ask the Admin to correct your Program tag on Manage Users.` })
+    if (!picked.length) picked = [tags[0]]
+    const unknown = picked.filter(p => !tags.some(t => sameProgram(t, p)))
+    if (unknown.length) {
+      return res.status(400).json({ message: `Your account chairs ${tags.join(', ')}, but this prospectus is labeled ${unknown.join(', ')}. Pick from ${tags.join(', ')}, or ask the Admin to correct your Program tag on Manage Users.` })
     }
+    // Store using the tag's own spelling, not whatever casing the client sent.
+    picked = picked.map(p => tags.find(t => sameProgram(t, p)) || p)
   }
-  if (detected_program && !sameProgram(detected_program, label)) {
-    return res.status(400).json({ message: `This file reads as ${detected_program}, not ${label}. Check you uploaded the right prospectus — if the file is correct, ask the Admin to correct your Program tag on Manage Users.` })
+  const label = picked.join(',')
+  if (detected_program && !picked.some(p => sameProgram(detected_program, p))) {
+    return res.status(400).json({ message: `This file reads as ${detected_program}, which isn't among the program(s) you selected (${label || 'none'}). Check you uploaded the right prospectus and picked the right program(s) — if the file is correct, ask the Admin to correct your Program tag on Manage Users.` })
   }
   if (!label) {
     return res.status(400).json({ message: 'Your account has no program set. Ask the Admin to set the Program you chair on Manage Users first.' })

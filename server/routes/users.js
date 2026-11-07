@@ -77,7 +77,9 @@ router.get('/program-options', authenticate, async (req, res) => {
       'SELECT programs FROM users WHERE department = ? AND programs IS NOT NULL', [department]
     )
     const seen = new Map()
-    for (const r of rows) if (r.program) seen.set(r.program.toUpperCase(), r.program)
+    // p.program can itself be several comma-separated tags (a prospectus
+    // filed under more than one program) — offer each one as its own option.
+    for (const r of rows) if (r.program) for (const p of r.program.split(',')) if (p.trim()) seen.set(p.trim().toUpperCase(), p.trim())
     for (const r of userRows) for (const p of r.programs.split(',')) if (p.trim()) seen.set(p.trim().toUpperCase(), p.trim())
     res.json([...seen.values()].sort())
   } catch (err) {

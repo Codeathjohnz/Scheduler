@@ -6,6 +6,7 @@ import { prospectusAPI, facultyLoadAPI, submissionsAPI, schedulingAPI, placehold
 import PlaceholdersPanel, { AssignModal } from './PlaceholdersPanel.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
 import PageHeader from '../../components/ui/PageHeader.jsx'
+import ProgramPicker from '../../components/common/ProgramPicker.jsx'
 import {
   Upload, FileSpreadsheet, Trash2, ChevronDown, ChevronUp,
   Loader2, BookOpen, CheckCircle2, X, Plus, Printer,
@@ -845,7 +846,7 @@ function MyOtherLoadModal({ year, semester, onClose, onSaved }) {
    unreliable even after isolating each cell (measured against a real
    sample) — every field here must stay editable, and the numeric columns
    are visually flagged so a chair doesn't just skim past a wrong number. */
-function PdfPreviewPanel({ preview, programName, setProgramName, academicYear, setAcademicYear, onUpdate, onRemove, onAddRow, onImport, onCancel, importing }) {
+function PdfPreviewPanel({ preview, programTags, setProgramTags, chairTags, academicYear, setAcademicYear, onUpdate, onRemove, onAddRow, onImport, onCancel, importing }) {
   const reviewCount = preview.subjects.filter(s => s.needsReview).length
   return (
     <div className="mb-8 bg-white rounded-2xl shadow-sm border-2 border-amber-400">
@@ -869,12 +870,14 @@ function PdfPreviewPanel({ preview, programName, setProgramName, academicYear, s
       </div>
 
       <div className="px-6 py-4 border-b flex flex-wrap gap-4 items-end">
-        {[['Program', programName, setProgramName, 'w-32'], ['Academic Year', academicYear, setAcademicYear, 'w-40']].map(([label, val, set, w]) => (
-          <div key={label}>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-            <input value={val} onChange={e => set(e.target.value)} className={`border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500 ${w}`} />
-          </div>
-        ))}
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Program(s)</label>
+          <ProgramPicker value={programTags} onChange={setProgramTags} options={chairTags} />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Academic Year</label>
+          <input value={academicYear} onChange={e => setAcademicYear(e.target.value)} className="border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500 w-40" />
+        </div>
         <button onClick={onAddRow}
           className="flex items-center gap-2 bg-white hover:bg-gray-50 border-2 border-gray-200 text-gray-700 font-semibold px-4 py-2.5 rounded-xl transition text-sm">
           <Plus className="w-4 h-4" /> Add Row
@@ -971,10 +974,13 @@ export default function FacultyLoad() {
   const [expandedGroups, setExpandedGroups] = useState({})
   const [importing, setImporting]         = useState(false)
   const [academicYear, setAcademicYear]   = useState('2022-2023')
-  // Default to this chair's own program (set by the Admin on their account,
-  // e.g. BSECE) instead of a hardcoded 'BSIT' — otherwise every prospectus
-  // imports under BSIT no matter whose it is. Still editable on the form.
-  const [programName, setProgramName]     = useState(() => String(user?.programs || '').split(',')[0].trim() || 'BSIT')
+  // Default to this chair's own program(s) (set by the Admin on their
+  // account, e.g. BSECE) instead of a hardcoded 'BSIT' — otherwise every
+  // prospectus imports under BSIT no matter whose it is. A chair holding more
+  // than one program (e.g. a major spanning BSIT and BSIS) can tag a single
+  // upload with several at once; still editable on the form.
+  const chairTags = String(user?.programs || '').split(',').map(p => p.trim()).filter(Boolean)
+  const [programTags, setProgramTags]     = useState(() => chairTags.length ? [chairTags[0]] : ['BSIT'])
   const [viewId, setViewId]               = useState(null)
   const [viewSubjects, setViewSubjects]   = useState([])
   const [viewGroups, setViewGroups]       = useState([])
@@ -1134,7 +1140,6 @@ export default function FacultyLoad() {
   // The program label comes from what the file itself says (detected), not
   // a form default. Falls back to the chair's own account tag only when the
   // file names no program at all.
-  const chairProgram = String(user?.programs || '').split(',')[0].trim()
   const applyParsedSubjects = (filename, parsed, detected) => {
     // NSTP isn't part of this system, so it never reaches the preview.
     const subjects = parsed.filter(s => !/^NSTP/i.test(String(s.course_code || '').trim()))
@@ -1142,7 +1147,9 @@ export default function FacultyLoad() {
     const groups = groupSubjects(subjects)
     const exp = {}; groups.forEach(g => { exp[`${g.year_level}-${g.semester}`] = true })
     setPreview({ filename, subjects, groups, detected: detected || null })
-    setProgramName(detected || chairProgram || programName)
+    const matchedTag = detected && chairTags.find(t => programKey(t) === programKey(detected))
+    if (matchedTag) setProgramTags([matchedTag])
+    else if (chairTags.length && !programTags.length) setProgramTags([chairTags[0]])
     setExpandedGroups(exp)
     toast.success(`Parsed ${subjects.length} subjects`)
   }
@@ -1185,7 +1192,7 @@ export default function FacultyLoad() {
   const handleImport = async () => {
     if (!preview) return; setImporting(true)
     try {
-      const r = await prospectusAPI.import({ program: programName, detected_program: preview.detected, academic_year: academicYear, filename: preview.filename, subjects: preview.subjects })
+      const r = await prospectusAPI.import({ program: programTags.join(','), detected_program: preview.detected, academic_year: academicYear, filename: preview.filename, subjects: preview.subjects })
       toast.success(`Imported ${r.data.count} subjects!`); setPreview(null); fetchProspectuses()
     } catch (err) { toast.error(err.response?.data?.message || 'Import failed.') }
     finally { setImporting(false) }
@@ -1255,7 +1262,7 @@ export default function FacultyLoad() {
     }
     setPdfImporting(true)
     try {
-      const r = await prospectusAPI.import({ program: programName, academic_year: academicYear, filename: pdfPreview.filename, subjects: cleaned })
+      const r = await prospectusAPI.import({ program: programTags.join(','), academic_year: academicYear, filename: pdfPreview.filename, subjects: cleaned })
       toast.success(`Imported ${r.data.count} subjects!`); setPdfPreview(null); fetchProspectuses()
     } catch (err) { toast.error(err.response?.data?.message || 'Import failed.') }
     finally { setPdfImporting(false) }
@@ -1458,7 +1465,7 @@ export default function FacultyLoad() {
           {pdfPreview && (
             <PdfPreviewPanel
               preview={pdfPreview}
-              programName={programName} setProgramName={setProgramName}
+              programTags={programTags} setProgramTags={setProgramTags} chairTags={chairTags}
               academicYear={academicYear} setAcademicYear={setAcademicYear}
               onUpdate={updatePdfSubject}
               onRemove={removePdfSubject}
@@ -1481,32 +1488,36 @@ export default function FacultyLoad() {
                 </div>
                 <button onClick={()=>setPreview(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
               </div>
-              <div className="px-6 py-4 border-b flex flex-wrap gap-4 items-end">
+              <div className="px-6 py-4 border-b space-y-3">
                 {preview.detected && (
                   <div className="w-full text-xs rounded-lg px-3 py-2 bg-green-50 border border-green-200 text-green-800">
                     The file names its program as <strong>{preview.detected}</strong>.
-                    {chairProgram && programKey(preview.detected) !== programKey(chairProgram) && (
+                    {chairTags.length > 0 && !chairTags.some(t => programKey(t) === programKey(preview.detected)) && (
                       <span className="block mt-1 font-semibold text-red-700">
-                        ⚠ Your account chairs {chairProgram}. This prospectus can't be imported here — check the file, or ask the Admin to correct your Program tag on Manage Users.
+                        ⚠ Your account chairs {chairTags.join(', ')}. This prospectus can't be imported here — check the file, or ask the Admin to correct your Program tags on Manage Users.
                       </span>
                     )}
                   </div>
                 )}
                 {!preview.detected && (
                   <div className="w-full text-xs rounded-lg px-3 py-2 bg-amber-50 border border-amber-200 text-amber-800">
-                    The file doesn't name a program. Confirm the Program below before importing.
+                    The file doesn't name a program. Confirm the program(s) below before importing.
                   </div>
                 )}
-                {[['Program',programName,setProgramName,'w-32'],['Academic Year',academicYear,setAcademicYear,'w-40']].map(([label,val,set,w])=>(
-                  <div key={label}>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-                    <input value={val} onChange={e=>set(e.target.value)} className={`border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500 ${w}`} />
+                <div className="flex flex-wrap gap-4 items-end">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Program(s)</label>
+                    <ProgramPicker value={programTags} onChange={setProgramTags} options={chairTags} />
                   </div>
-                ))}
-                <button onClick={handleImport} disabled={importing}
-                  className="flex items-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-bold px-5 py-2.5 rounded-xl transition text-sm">
-                  {importing?<><Loader2 className="w-4 h-4 animate-spin"/>Importing...</>:<><CheckCircle2 className="w-4 h-4"/>Import to Database</>}
-                </button>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Academic Year</label>
+                    <input value={academicYear} onChange={e=>setAcademicYear(e.target.value)} className="border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500 w-40" />
+                  </div>
+                  <button onClick={handleImport} disabled={importing}
+                    className="flex items-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white font-bold px-5 py-2.5 rounded-xl transition text-sm">
+                    {importing?<><Loader2 className="w-4 h-4 animate-spin"/>Importing...</>:<><CheckCircle2 className="w-4 h-4"/>Import to Database</>}
+                  </button>
+                </div>
               </div>
               <div className="px-6 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
                 {preview.groups.map(g => {
@@ -1563,7 +1574,7 @@ export default function FacultyLoad() {
                     <div className="flex items-center gap-4 px-6 py-4 hover:bg-gray-50 transition">
                       <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center shrink-0"><FileSpreadsheet className="w-5 h-5 text-green-700"/></div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-800">{p.program}{p.academic_year&&<span className="text-gray-500 font-normal ml-2">AY {p.academic_year}</span>}</p>
+                        <p className="font-semibold text-gray-800">{String(p.program || '').split(',').join(', ')}{p.academic_year&&<span className="text-gray-500 font-normal ml-2">AY {p.academic_year}</span>}</p>
                         <p className="text-xs text-gray-400 mt-0.5 truncate">{p.filename&&<><span className="text-green-700">{p.filename}</span> · </>}Uploaded by {p.uploaded_by_name} · {new Date(p.created_at).toLocaleDateString()}</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
