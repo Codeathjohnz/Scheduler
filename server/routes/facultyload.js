@@ -811,6 +811,13 @@ router.get('/my-load.xlsx', authenticate, authorize('instructor', 'chair', 'dean
       SELECT fle.* FROM faculty_load_entries fle
       WHERE fle.academic_year = ? AND fle.semester = ? AND fle.assigned_instructor_id = ?
       ORDER BY fle.sort_order, fle.id`, [year, semester, req.user.id])
+    // Filtered by the schedule row's OWN term (gs.academic_year/semester),
+    // not the faculty load entry's — exactly like every other schedule view
+    // (My Schedule, department view, student view). Filtering through the
+    // entry's term instead is one extra join hop that can disagree with
+    // what's actually published if they ever drift apart, which is exactly
+    // the kind of mismatch between this export and the live calendar that
+    // was reported.
     const [sessions] = await pool.query(`
       SELECT gs.days, gs.start_time, gs.end_time, gs.session_type,
              fle.course_code, fle.program_yr_sec,
@@ -819,7 +826,7 @@ router.get('/my-load.xlsx', authenticate, authorize('instructor', 'chair', 'dean
       FROM generated_schedules gs
       JOIN faculty_load_entries fle ON fle.id = gs.faculty_entry_id
       LEFT JOIN rooms r ON r.id = gs.room_id
-      WHERE fle.assigned_instructor_id = ? AND fle.academic_year = ? AND fle.semester = ?
+      WHERE fle.assigned_instructor_id = ? AND gs.academic_year = ? AND gs.semester = ?
         AND gs.is_published = 1`,
       [req.user.id, year, semester])
     const [adminLoads] = await pool.query(`
