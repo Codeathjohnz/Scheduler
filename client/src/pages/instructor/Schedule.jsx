@@ -27,6 +27,14 @@ function fmt12(t) {
   return `${h12}:${String(m).padStart(2,'0')} ${suffix}`
 }
 
+function ordinalFloor(n) {
+  const v = Number(n)
+  if (!v || v < 1) return null
+  const mod100 = v % 100
+  const suffix = (mod100 >= 11 && mod100 <= 13) ? 'th' : ['th','st','nd','rd'][v % 10] || 'th'
+  return `${v}${suffix} Floor`
+}
+
 // Stable color per subject code
 function subjectColor(code) {
   let h = 0
@@ -44,11 +52,11 @@ function Block({ slot, lane = { col: 0, cols: 1 } }) {
   return (
     <div className="absolute rounded-lg px-1.5 py-1 overflow-hidden"
       style={{ top, height, minHeight: 24, left: `calc(${lane.col / lane.cols * 100}% + 2px)`, width: `calc(${100 / lane.cols}% - 4px)`, background: colors.bg, borderLeft: `3px solid ${colors.border}` }}
-      title={`${slot.course_code} — ${slot.program_yr_sec || ''}\n${slot.room_name || 'No room'}\n${fmt12(slot.start_time)} – ${fmt12(slot.end_time)}`}
+      title={`${slot.course_code} — ${slot.program_yr_sec || ''}\n${slot.room_name || 'No room'}${ordinalFloor(slot.floor_level) ? ` (${ordinalFloor(slot.floor_level)})` : ''}\n${fmt12(slot.start_time)} – ${fmt12(slot.end_time)}`}
     >
       <p className="font-bold text-[10px] leading-tight truncate" style={{ color: colors.text }}>{slot.course_code}</p>
       {height > 30 && <p className="text-[9px] leading-tight truncate opacity-80" style={{ color: colors.text }}>{slot.program_yr_sec || slot.session_type}</p>}
-      {height > 44 && <p className="text-[9px] leading-tight truncate opacity-70" style={{ color: colors.text }}>{slot.room_name || '—'}{slot.room_type ? ` · ${roomTypeShort(slot.room_type)}` : ''}{roomMismatch(slot) ? ' ⚠' : ''}</p>}
+      {height > 44 && <p className="text-[9px] leading-tight truncate opacity-70" style={{ color: colors.text }}>{slot.room_name || '—'}{ordinalFloor(slot.floor_level) ? ` · ${ordinalFloor(slot.floor_level)}` : ''}{slot.room_type ? ` · ${roomTypeShort(slot.room_type)}` : ''}{roomMismatch(slot) ? ' ⚠' : ''}</p>}
     </div>
   )
 }
@@ -220,7 +228,7 @@ export default function InstructorSchedule() {
                   </span>
                   <span className="flex items-center gap-1.5">
                     <DoorOpen className="w-3.5 h-3.5 text-gray-400" />
-                    {s.room_name || '—'}
+                    {s.room_name || '—'}{ordinalFloor(s.floor_level) ? ` (${ordinalFloor(s.floor_level)})` : ''}
                     <RoomTypeBadge type={s.room_type} />
                   </span>
                 </div>

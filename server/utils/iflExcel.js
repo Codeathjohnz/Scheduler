@@ -25,6 +25,13 @@ const COLLEGE = {
 
 const toMin = (t) => { const [h, m] = String(t).slice(0, 5).split(':').map(Number); return h * 60 + m }
 const credit = (lec, lab) => Number(lec || 0) + Number(lab || 0) * 0.75
+function ordinalFloor(n) {
+  const v = Number(n)
+  if (!v || v < 1) return null
+  const mod100 = v % 100
+  const suffix = (mod100 >= 11 && mod100 <= 13) ? 'th' : ['th', 'st', 'nd', 'rd'][v % 10] || 'th'
+  return `${v}${suffix} Floor`
+}
 
 const box = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }
 function put(ws, addr, value, { bold = false, center = false, fill = null, border = false, wrap = false, size = 10 } = {}) {
@@ -99,7 +106,8 @@ export async function buildIflWorkbook({ instructor, semester, year, sessions, e
     const first = Math.floor((start - GRID_START) / SLOT_MIN)
     const last = Math.ceil((end - GRID_START) / SLOT_MIN)
     if (first < 0 || first >= GRID_SLOTS) continue
-    const room = s.room && s.room.trim() ? s.room.trim() : 'ONLINE CLASS'
+    const floor = ordinalFloor(s.floor_level)
+    const room = s.room && s.room.trim() ? `${s.room.trim()}${floor ? ` (${floor})` : ''}` : 'ONLINE CLASS'
     const text = `${s.course_code} (${String(s.session_type).toUpperCase() === 'LAB' ? 'LAB' : 'LEC'}) - (${s.program_yr_sec || '—'}) ${room}`
     const key = `${GRID_FIRST_ROW + first}|${col}`
     ;(grid[key] ||= []).push(text)

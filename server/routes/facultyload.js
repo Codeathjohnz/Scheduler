@@ -814,11 +814,13 @@ router.get('/my-load.xlsx', authenticate, authorize('instructor', 'chair', 'dean
     const [sessions] = await pool.query(`
       SELECT gs.days, gs.start_time, gs.end_time, gs.session_type,
              fle.course_code, fle.program_yr_sec,
-             CASE WHEN r.id IS NULL THEN NULL ELSE CONCAT(r.building, ' ', r.room_number) END AS room
+             CASE WHEN r.id IS NULL THEN NULL ELSE CONCAT(r.building, ' ', r.room_number) END AS room,
+             r.floor_level
       FROM generated_schedules gs
       JOIN faculty_load_entries fle ON fle.id = gs.faculty_entry_id
       LEFT JOIN rooms r ON r.id = gs.room_id
-      WHERE fle.assigned_instructor_id = ? AND fle.academic_year = ? AND fle.semester = ?`,
+      WHERE fle.assigned_instructor_id = ? AND fle.academic_year = ? AND fle.semester = ?
+        AND gs.is_published = 1`,
       [req.user.id, year, semester])
     const [adminLoads] = await pool.query(`
       SELECT load_type, description, units, hours FROM faculty_admin_loads
